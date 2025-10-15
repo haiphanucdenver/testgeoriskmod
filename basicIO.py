@@ -3,7 +3,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
-
+# check 2
 load_dotenv()
 
 def get_conn():
