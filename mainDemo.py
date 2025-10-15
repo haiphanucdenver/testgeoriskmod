@@ -210,7 +210,7 @@ def main():
 
             # Important: Commit all changes made during the session
             conn.commit()
-            print("\nDemo finished. All changes have been saved to the database.")
+            print("\nDemo finished. All changes have been saved to the database. ")
 
     except psycopg2.Error as e:
         print(f"\n--- A database error occurred: {e} ---")
@@ -219,6 +219,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-=======
-# Testing
->>>>>>> cb0a5f31d533cb4ed5b9033d17b4ce058b08f69e
