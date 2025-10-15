@@ -106,7 +106,7 @@ def display_all_risks(conn):
         print("===================================")
 
 def display_risk_by_id(conn, risk_id: int):
-    """Fetches and prints a single risk record by its ID."""
+    """Fetches and prints a single risk record by its ID. """
     sql = """
     SELECT r.risk_id, r.title, r.overall_score,
            r.h_score, r.l_score, r.v_score,
