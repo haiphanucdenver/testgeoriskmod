@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -6,7 +5,7 @@ from dotenv import load_dotenv
 import random
 # Load environment variables from .env file
 load_dotenv()
-
+# check 1
 # --- Database Connection ---
 def get_conn():
     """Establishes and returns a new database connection."""
