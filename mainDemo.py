@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 import random
 # Load environment variables from .env file
 load_dotenv()
-# check 1
+# check 3
 # --- Database Connection ---
 def get_conn():
     """Establishes and returns a new database connection."""
