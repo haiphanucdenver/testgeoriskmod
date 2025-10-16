@@ -3,30 +3,33 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import random
+
 # Load environment variables from .env file
 load_dotenv()
-# check 4
+
 # --- Database Connection ---
 def get_conn():
     """Establishes and returns a new database connection."""
-    return psycopg2.connect(
-        host=os.getenv("DB_HOST"),
-        port=os.getenv("DB_PORT", "5432"),
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        sslmode=os.getenv("DB_SSLMODE", "require"),
-        connect_timeout=10,
-    )
+    try:
+        conn = psycopg2.connect(
+            host=os.getenv("DB_HOST"),
+            port=os.getenv("DB_PORT", "5432"),
+            dbname=os.getenv("DB_NAME"),
+            user=os.getenv("DB_USER"),
+            password=os.getenv("DB_PASSWORD"),
+            sslmode=os.getenv("DB_SSLMODE", "require"),
+            connect_timeout=10,
+        )
+        return conn
+    except psycopg2.OperationalError as e:
+        print(f"--- DATABASE CONNECTION FAILED ---")
+        print(f"Error: {e}")
+        print("Please check your .env file and network connection.")
+        return None
 
-# --- Data Insertion Functions ---
-# Note: These now accept a 'conn' object for efficiency
+# --- Core Data Functions ---
 def insert_location(conn, name: str, lat: float, lon: float, description: str = None, region: str = None) -> int:
-    sql = """
-    INSERT INTO location (name, coordinates, description, region)
-    VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s, %s)
-    RETURNING location_id;
-    """
+    sql = "INSERT INTO location (name, coordinates, description, region) VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s, %s) RETURNING location_id;"
     with conn.cursor() as cur:
         cur.execute(sql, (name, lon, lat, description, region))
         return cur.fetchone()[0]
@@ -52,46 +55,39 @@ def insert_local_lore(conn, location_id: int, lore_narrative: str, source_title:
 def insert_risk(conn, location_id: int, title: str, description: str,
                 h_score: float, l_score: float, v_score: float,
                 event_id: int, vulnerability_id: int, lore_id: int) -> int:
-    """Computes overall_score using the Borromean product (H * L * V)."""
-    # This is the correct Borromean "product" calculation
+    """Computes overall_score as an AVERAGE of the H, L, V scores."""
     scores = [s for s in (h_score, l_score, v_score) if s is not None]
-    
-    # Calculate the average if the list is not empty, otherwise set to None
     overall = round(sum(scores) / len(scores), 2) if scores else None
 
-    sql = """
-    INSERT INTO risk (
-      location_id, event_id, vulnerability_id, lore_id,
-      title, description,
-      h_score, l_score, v_score, overall_score
-    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-    RETURNING risk_id;
-    """
+    sql = "INSERT INTO risk (location_id, event_id, vulnerability_id, lore_id, title, description, h_score, l_score, v_score, overall_score) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING risk_id;"
     with conn.cursor() as cur:
-        cur.execute(sql, (
-            location_id, event_id, vulnerability_id, lore_id,
-            title, description, h_score, l_score, v_score, overall
-        ))
+        cur.execute(sql, (location_id, event_id, vulnerability_id, lore_id, title, description, h_score, l_score, v_score, overall))
         return cur.fetchone()[0]
 
-# --- Data Display Function ---
+def delete_risk_by_id(conn, risk_id: int) -> int:
+    sql = "DELETE FROM risk WHERE risk_id = %s;"
+    with conn.cursor() as cur:
+        cur.execute(sql, (risk_id,))
+        return cur.rowcount
+
+def delete_all_data(conn):
+    """Deletes all data from the tables in the correct order."""
+    # Truncate tables with CASCADE to handle foreign key dependencies
+    sql = "TRUNCATE TABLE location, event, vulnerability, local_lore, risk RESTART IDENTITY CASCADE;"
+    with conn.cursor() as cur:
+        cur.execute(sql)
+    print("\n--- All data has been deleted. ---")
+
+# --- Display Functions ---
 def display_all_risks(conn):
-    """Fetches and prints all risk records in a detailed format."""
-    sql = """
-    SELECT r.risk_id, r.title, r.overall_score,
-           r.h_score, r.l_score, r.v_score,
-           l.name AS location_name
-    FROM risk r
-    JOIN location l ON l.location_id = r.location_id
-    ORDER BY r.risk_id;
-    """
+    sql = "SELECT r.risk_id, r.title, r.overall_score, r.h_score, r.l_score, r.v_score, l.name AS location_name FROM risk r JOIN location l ON l.location_id = r.location_id ORDER BY r.risk_id;"
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(sql)
         risks = cur.fetchall()
 
     if not risks:
-        print("\nNo risk records found in the database.")
-        return
+        print("\n--- No risk records found in the database. ---")
+        return False
 
     print("\n--- Displaying All Risk Records ---")
     for risk in risks:
@@ -101,19 +97,12 @@ def display_all_risks(conn):
         print(f"  H Score (Hazard): {risk['h_score']:.2f}")
         print(f"  L Score (Local Lore): {risk['l_score']:.2f}")
         print(f"  V Score (Vulnerability): {risk['v_score']:.2f}")
-        print(f"  Overall Borromean Score: {risk['overall_score']:.3f}")
+        print(f"  Overall Score (Average): {risk['overall_score']:.3f}")
         print("===================================")
+    return True
 
 def display_risk_by_id(conn, risk_id: int):
-    """Fetches and prints a single risk record by its ID. """
-    sql = """
-    SELECT r.risk_id, r.title, r.overall_score,
-           r.h_score, r.l_score, r.v_score,
-           l.name AS location_name
-    FROM risk r
-    JOIN location l ON l.location_id = r.location_id
-    WHERE r.risk_id = %s;
-    """
+    sql = "SELECT r.risk_id, r.title, r.overall_score, r.h_score, r.l_score, r.v_score, l.name AS location_name FROM risk r JOIN location l ON l.location_id = r.location_id WHERE r.risk_id = %s;"
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(sql, (risk_id,))
         risk = cur.fetchone()
@@ -129,92 +118,105 @@ def display_risk_by_id(conn, risk_id: int):
     print(f"  H Score (Hazard): {risk['h_score']:.2f}")
     print(f"  L Score (Local Lore): {risk['l_score']:.2f}")
     print(f"  V Score (Vulnerability): {risk['v_score']:.2f}")
-    print(f"  Overall Borromean Score: {risk['overall_score']:.3f}")
+    print(f"  Overall Score (Average): {risk['overall_score']:.3f}")
     print("===================================")
 
-def delete_risk(conn, risk_id: int) -> int:
-    """Deletes a risk record by its ID and returns the number of rows deleted."""
-    sql = "DELETE FROM risk WHERE risk_id = %s;"
-    with conn.cursor() as cur:
-        cur.execute(sql, (risk_id,))
-        # Return the number of rows affected (should be 1 if successful, 0 if not found)
-        return cur.rowcount
+# --- Menu Function (Updated) ---
+def display_menu():
+    print("\n==============================================")
+    print("      === GEORISKMOD DEMO MENU ===")
+    print("==============================================")
+    print("1 - Add a new location and its data")
+    print("2 - Calculate a new risk for the added location")
+    print("3 - Show all risk data")
+    print("4 - Delete one risk by ID")
+    print("5 - Delete ALL data")
+    print("6 - Exit")
+    print("==============================================")
 
-# --- Main Demo Function ---
+# --- Main Demo Loop (Updated) ---
 def main():
-    print("===============================================")
-    print("=== Welcome to the GEORISKMOD Tool Demo ===")
-    print("===============================================")
+    conn = get_conn()
+    if not conn:
+        return # Exit if connection fails
 
-    try:
-        with get_conn() as conn:
-            # Step 1: Optionally insert new sample data
-            if input("\n> Do you want to insert new sample data? (y/n): ").lower() == 'y':
-                print("\nInserting sample data...")
-                loc_id = insert_location(conn, "Steep Road Cut", 47.6, -122.3, "A known landslide-prone area")
-                print(f"  -> Successfully inserted new location with ID: {loc_id}")
+    # This dictionary holds the IDs of the data created in step 1
+    # so they can be used in step 2.
+    temp_data = {}
 
-                event_id = insert_event(conn, loc_id, "Debris Flow", "2025-10-12")
-                print(f"  -> Successfully inserted new event with ID: {event_id}")
+    while True:
+        display_menu()
+        choice = input("> Please enter your choice: ")
 
-                vuln_id = insert_vulnerability(conn, loc_id, "Arterial Road", 0)
-                print(f"  -> Successfully inserted new vulnerability context with ID: {vuln_id}")
-
-                lore_id = insert_local_lore(conn, loc_id, "Locals report a slide here every 20-30 years.", "Community Meeting Records")
-                print(f"  -> Successfully inserted new local lore with ID: {lore_id}")
+        if choice == '1':
+            print("\n--- 1. Adding New Location and Data ---")
+            loc_id = insert_location(conn, "Volcano Flank Village", 19.43, -99.13, "Village near an active stratovolcano")
+            event_id = insert_event(conn, loc_id, "Lava Flow", "2025-10-16")
+            vuln_id = insert_vulnerability(conn, loc_id, "Residential Area", 150)
+            lore_id = insert_local_lore(conn, loc_id, "Oral history mentions a significant flow 200 years ago.", "Elder Council Testimony")
             
+            # Store the IDs for step 2
+            temp_data = {'loc_id': loc_id, 'event_id': event_id, 'vuln_id': vuln_id, 'lore_id': lore_id}
+            print(f"\n-> Successfully inserted new location (ID: {loc_id}) and related data.")
+            print("-> You can now proceed to step 2 to calculate the risk.")
+
+        elif choice == '2':
+            print("\n--- 2. Calculating New Risk ---")
+            if 'loc_id' in temp_data:
+                h_score = round(random.uniform(0.1, 0.9), 2)
+                l_score = round(random.uniform(0.1, 0.9), 2)
+                v_score = round(random.uniform(0.1, 0.9), 2)
+
+                risk_id = insert_risk(conn, temp_data['loc_id'], "Lava Flow Risk Assessment",
+                                    "Probabilistic assessment based on recent seismic activity.",
+                                    h_score, l_score, v_score,
+                                    temp_data['event_id'], temp_data['vuln_id'], temp_data['lore_id'])
                 
+                display_risk_by_id(conn, risk_id)
+                temp_data = {} # Clear temp data after it has been used
+            else:
+                print("\n-> Please use option 1 to add a location first before calculating a risk.")
+
+        elif choice == '3':
+            print("\n--- 3. Showing All Risk Data ---")
             display_all_risks(conn)
-            if input("\n> Do you want to delete an existing risk record? (y/n): ").lower() == 'y':
+
+        elif choice == '4':
+            print("\n--- 4. Deleting One Risk by ID ---")
+            if display_all_risks(conn): # Show risks first so user can choose
                 try:
-                    # Get the ID from the user
-                    risk_id_to_delete = int(input("  Please enter the risk_id you want to delete: "))
-                    
-                    # Call the new delete function
-                    rows_deleted = delete_risk(conn, risk_id_to_delete)
-                    
-                    # Provide feedback to the user
+                    risk_id_to_delete = int(input("\n> Please enter the risk_id you want to delete: "))
+                    rows_deleted = delete_risk_by_id(conn, risk_id_to_delete)
                     if rows_deleted > 0:
-                        print(f"  -> Successfully deleted risk record with ID: {risk_id_to_delete}")
-                        # Display the updated list of risks
-                        print("\nHere is the updated list of risks:")
-                        display_all_risks(conn)
+                        print(f"\n-> Successfully deleted risk record with ID: {risk_id_to_delete}")
                     else:
-                        print(f"  -> No risk record found with ID: {risk_id_to_delete}. No changes were made.")
-                
+                        print(f"\n-> No risk record found with ID: {risk_id_to_delete}.")
                 except ValueError:
-                    print("  -> Invalid input. Please enter a valid number for the risk_id.")
+                    print("\n-> Invalid input. Please enter a valid number.")
 
-            if input("\n> Do you want to calculate risk for the new data? (y/n): ").lower() == 'y':
-                if 'loc_id' in locals():
-                    print("\nCalculating new risk...")
-                    
-                    h_score = random.uniform(0.1, 0.9)
-                    l_score = random.uniform(0.1, 0.9)
-                    v_score = random.uniform(0.1, 0.9)
-                    
-                    risk_id = insert_risk(conn, loc_id, "Debris Flow Risk at Road Cut",
-                                        "Risk assessment following heavy rain forecast.",
-                                        h_score, l_score, v_score,
-                                        event_id, vuln_id, lore_id)
-                    print(f"   Successfully calculated and inserted new risk with ID: {risk_id}")
-                    display_risk_by_id(conn, risk_id)
-                else:
-                    print("  No new risk from previous steps. Exit!")
-            # Always display whatever is in the database at the end of the insertion step
-                
+        elif choice == '5':
+            print("\n--- 5. Deleting ALL Data ---")
+            if input("> Are you sure you want to delete ALL data? This cannot be undone. (y/n): ").lower() == 'y':
+                delete_all_data(conn)
+            else:
+                print("\n-> Deletion cancelled.")
 
-            # Step 3: Display all records
-            
-
-            # Important: Commit all changes made during the session
+        elif choice == '6':
+            print("\nExiting demo. Goodbye!")
+            break
+        
+        else:
+            print("\nInvalid choice. Please enter a number between 1 and 6.")
+        
+        # Commit changes after each successful operation that modifies data
+        if choice in ['1', '2', '4', '5']:
             conn.commit()
-            print("\nDemo finished. All changes have been saved to the database. ")
 
-    except psycopg2.Error as e:
-        print(f"\n--- A database error occurred: {e} ---")
-    except Exception as e:
-        print(f"\n--- An unexpected error occurred: {e} ---")
+    # Close the connection when the loop exits
+    if conn:
+        conn.close()
+
 
 if __name__ == "__main__":
     main()
+
