@@ -29,9 +29,14 @@ def get_conn():
 
 # --- Core Data Functions ---
 def insert_location(conn, name: str, lat: float, lon: float, description: str = None, region: str = None) -> int:
-    sql = "INSERT INTO location (name, coordinates, description, region) VALUES (%s, ST_SetSRID(ST_MakePoint(%s, %s), 4326)::geography, %s, %s) RETURNING location_id;"
+    """
+    --- CHANGED ---
+    Updated SQL to insert into 'latitude' and 'longitude' columns,
+    matching your provided CREATE TABLE script.
+    """
+    sql = "INSERT INTO location (name, latitude, longitude, description, region) VALUES (%s, %s, %s, %s, %s) RETURNING location_id;"
     with conn.cursor() as cur:
-        cur.execute(sql, (name, lon, lat, description, region))
+        cur.execute(sql, (name, lat, lon, description, region))
         return cur.fetchone()[0]
 
 def insert_event(conn, location_id: int, hazard_type: str, date_observed: str) -> int:
@@ -46,16 +51,23 @@ def insert_vulnerability(conn, location_id: int, asset_type: str, num_buildings:
         cur.execute(sql, (location_id, asset_type, num_buildings))
         return cur.fetchone()[0]
 
-def insert_local_lore(conn, location_id: int, lore_narrative: str, source_title: str) -> int:
-    sql = "INSERT INTO local_lore (location_id, lore_narrative, source_title) VALUES (%s, %s, %s) RETURNING lore_id;"
+def insert_local_lore(conn, location_id: int, lore_narrative: str) -> int:
+    """
+    --- CHANGED ---
+    Removed 'source_title' as it is not a column in the 'local_lore' table.
+    """
+    sql = "INSERT INTO local_lore (location_id, lore_narrative) VALUES (%s, %s) RETURNING lore_id;"
     with conn.cursor() as cur:
-        cur.execute(sql, (location_id, lore_narrative, source_title))
+        cur.execute(sql, (location_id, lore_narrative))
         return cur.fetchone()[0]
 
 def insert_risk(conn, location_id: int, title: str, description: str,
                 h_score: float, l_score: float, v_score: float,
                 event_id: int, vulnerability_id: int, lore_id: int) -> int:
-    """Computes overall_score as an AVERAGE of the H, L, V scores."""
+    """
+    Computes overall_score as an AVERAGE of the H, L, V scores.
+    This matches your 'hybrid' risk table model.
+    """
     scores = [s for s in (h_score, l_score, v_score) if s is not None]
     overall = round(sum(scores) / len(scores), 2) if scores else None
 
@@ -71,9 +83,11 @@ def delete_risk_by_id(conn, risk_id: int) -> int:
         return cur.rowcount
 
 def delete_all_data(conn):
-    """Deletes all data from the tables in the correct order."""
-    # Truncate tables with CASCADE to handle foreign key dependencies
-    sql = "TRUNCATE TABLE location, event, vulnerability, local_lore, risk RESTART IDENTITY CASCADE;"
+    """
+    --- CHANGED ---
+    Deletes all data from all tables, including new ones.
+    """
+    sql = "TRUNCATE TABLE location, event, dynamic_trigger, vulnerability, local_lore, source, processing, risk RESTART IDENTITY CASCADE;"
     with conn.cursor() as cur:
         cur.execute(sql)
     print("\n--- All data has been deleted. ---")
@@ -94,10 +108,10 @@ def display_all_risks(conn):
         print(f"\n========== RISK ID: {risk['risk_id']} ==========")
         print(f"  Title: {risk['title']}")
         print(f"  Location Name: {risk['location_name']}")
-        print(f"  H Score (Hazard): {risk['h_score']:.2f}")
-        print(f"  L Score (Local Lore): {risk['l_score']:.2f}")
-        print(f"  V Score (Vulnerability): {risk['v_score']:.2f}")
-        print(f"  Overall Score (Average): {risk['overall_score']:.3f}")
+        print(f"  H Score (Hazard): {risk['h_score']:.2f}" if risk['h_score'] is not None else "  H Score (Hazard): N/A")
+        print(f"  L Score (Local Lore): {risk['l_score']:.2f}" if risk['l_score'] is not None else "  L Score (Local Lore): N/A")
+        print(f"  V Score (Vulnerability): {risk['v_score']:.2f}" if risk['v_score'] is not None else "  V Score (Vulnerability): N/A")
+        print(f"  Overall Risk Score (Average): {risk['overall_score']:.3f}" if risk['overall_score'] is not None else "  Overall Risk Score (Average): N/A")
         print("===================================")
     return True
 
@@ -115,22 +129,23 @@ def display_risk_by_id(conn, risk_id: int):
     print(f"\n========== RISK ID: {risk['risk_id']} ==========")
     print(f"  Title: {risk['title']}")
     print(f"  Location Name: {risk['location_name']}")
-    print(f"  H Score (Hazard): {risk['h_score']:.2f}")
-    print(f"  L Score (Local Lore): {risk['l_score']:.2f}")
-    print(f"  V Score (Vulnerability): {risk['v_score']:.2f}")
-    print(f"  Overall Score (Average): {risk['overall_score']:.3f}")
+    print(f"  H Score (Hazard): {risk['h_score']:.2f}" if risk['h_score'] is not None else "  H Score (Hazard): N/A")
+    print(f"  L Score (Local Lore): {risk['l_score']:.2f}" if risk['l_score'] is not None else "  L Score (Local Lore): N/A")
+    print(f"  V Score (Vulnerability): {risk['v_score']:.2f}" if risk['v_score'] is not None else "  V Score (Vulnerability): N/A")
+    print(f"  Overall Risk Score (Average): {risk['overall_score']:.3f}" if risk['overall_score'] is not None else "  Overall Risk Score (Average): N/A")
     print("===================================")
 
 # --- Menu Function (Updated) ---
 def display_menu():
     print("\n==============================================")
-    print("      === GEORISKMOD DEMO MENU ===")
+    print("      ===  Welcome to GEORISKMOD  ===")
+    print("      ===        DEMO MENU        ===")
     print("==============================================")
     print("1 - Add a new location and its data")
     print("2 - Calculate a new risk for the added location")
     print("3 - Show all risk data")
     print("4 - Delete one risk by ID")
-    print("5 - Delete ALL data")
+    print("5 - Delete ALL data ")
     print("6 - Exit")
     print("==============================================")
 
@@ -138,7 +153,7 @@ def display_menu():
 def main():
     conn = get_conn()
     if not conn:
-        return # Exit if connection fails
+        return  # Exit if connection fails
 
     # This dictionary holds the IDs of the data created in step 1
     # so they can be used in step 2.
@@ -146,19 +161,46 @@ def main():
 
     while True:
         display_menu()
-        choice = input("> Please enter your choice: ")
+        choice = input("> Please enter your choice: ").upper()  # Use upper() for D choices
 
         if choice == '1':
             print("\n--- 1. Adding New Location and Data ---")
-            loc_id = insert_location(conn, "Volcano Flank Village", 19.43, -99.13, "Village near an active stratovolcano")
-            event_id = insert_event(conn, loc_id, "Lava Flow", "2025-10-16")
-            vuln_id = insert_vulnerability(conn, loc_id, "Residential Area", 150)
-            lore_id = insert_local_lore(conn, loc_id, "Oral history mentions a significant flow 200 years ago.", "Elder Council Testimony")
             
-            # Store the IDs for step 2
-            temp_data = {'loc_id': loc_id, 'event_id': event_id, 'vuln_id': vuln_id, 'lore_id': lore_id}
-            print(f"\n-> Successfully inserted new location (ID: {loc_id}) and related data.")
-            print("-> You can now proceed to step 2 to calculate the risk.")
+            # --- CHANGED: Get user input instead of hard-coding ---
+            try:
+                loc_name = input("> Enter Location Name (e.g., Boulder Creek): ")
+                if not loc_name:
+                    print("\n-> Name cannot be empty. Operation cancelled.")
+                    continue
+
+                lat = float(input("> Enter Latitude (e.g., 40.0150): "))
+                lon = float(input("> Enter Longitude (e.g., -105.2705): "))
+                desc = input("> Enter Description (optional): ")
+
+                # --- Insert the new, unique data ---
+                loc_id = insert_location(conn, loc_name, lat, lon, desc)
+                
+                # Now add sample related data for this new location
+                event_id = insert_event(conn, loc_id, "Debris Flow", "2025-10-17")
+                vuln_id = insert_vulnerability(conn, loc_id, "Transportation Corridor", 2) # e.g., 2 roads
+                lore_id = insert_local_lore(conn, loc_id, "Locals report this creek floods every 10 years.")
+                
+                # Store the IDs for step 2
+                temp_data = {'loc_id': loc_id, 'event_id': event_id, 'vuln_id': vuln_id, 'lore_id': lore_id}
+                print(f"\n-> Successfully inserted new location (ID: {loc_id}) and related data.")
+                print("-> You can now proceed to step 2 to calculate the risk.")
+            
+            except psycopg2.errors.UniqueViolation:
+                print(f"\n-> ERROR: A location with that name, latitude, and longitude already exists.")
+                print("-> Please try again with a unique combination.")
+                conn.rollback() # Rollback the failed transaction
+            except ValueError:
+                print("\n-> ERROR: Invalid input. Latitude and longitude must be numbers (e.g., 40.0150).")
+                conn.rollback()
+            except Exception as e:
+                print(f"\n-> An unexpected error occurred: {e}")
+                conn.rollback()
+            # --- End of Change ---
 
         elif choice == '2':
             print("\n--- 2. Calculating New Risk ---")
@@ -167,13 +209,13 @@ def main():
                 l_score = round(random.uniform(0.1, 0.9), 2)
                 v_score = round(random.uniform(0.1, 0.9), 2)
 
-                risk_id = insert_risk(conn, temp_data['loc_id'], "Lava Flow Risk Assessment",
-                                    "Probabilistic assessment based on recent seismic activity.",
+                risk_id = insert_risk(conn, temp_data['loc_id'], f"Risk Assessment for {temp_data['loc_id']}",
+                                    "Probabilistic assessment based on user-added data.",
                                     h_score, l_score, v_score,
                                     temp_data['event_id'], temp_data['vuln_id'], temp_data['lore_id'])
                 
                 display_risk_by_id(conn, risk_id)
-                temp_data = {} # Clear temp data after it has been used
+                temp_data = {}  # Clear temp data after it has been used
             else:
                 print("\n-> Please use option 1 to add a location first before calculating a risk.")
 
@@ -183,7 +225,7 @@ def main():
 
         elif choice == '4':
             print("\n--- 4. Deleting One Risk by ID ---")
-            if display_all_risks(conn): # Show risks first so user can choose
+            if display_all_risks(conn):  # Show risks first so user can choose
                 try:
                     risk_id_to_delete = int(input("\n> Please enter the risk_id you want to delete: "))
                     rows_deleted = delete_risk_by_id(conn, risk_id_to_delete)
@@ -216,7 +258,5 @@ def main():
     if conn:
         conn.close()
 
-
 if __name__ == "__main__":
     main()
-
