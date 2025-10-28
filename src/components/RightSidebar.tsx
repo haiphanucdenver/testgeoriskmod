@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import {
   Dialog,
@@ -65,15 +66,15 @@ export function RightSidebar() {
 
         {/* Three Circle Diagram with individual numbers and labels */}
         <div className="flex justify-center">
-          <div 
-            className="relative w-28 h-26 cursor-pointer hover:opacity-80 transition-opacity"
+          <div
+            className="relative w-32 h-32 cursor-pointer hover:opacity-80 transition-opacity"
             onClick={() => setShowFormulaDialog(true)}
             title="Click to see calculation formula"
           >
-            {/* Blue circle - top left, H label at top-left corner */}
-            <div className="absolute top-0 left-2">
-              <div className="relative w-12 h-12 border-4 border-blue-500 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold">0.72</span>
+            {/* Blue circle - top left, H label at top-left corner - LARGEST (highest risk) */}
+            <div className="absolute top-0 left-0">
+              <div className="relative w-16 h-16 border-4 border-blue-500 rounded-full bg-blue-500/10 flex items-center justify-center">
+                <span className="text-white text-sm font-semibold">0.72</span>
                 {/* H label at top-left corner */}
                 <div className="absolute -top-2 -left-2">
                   <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">H</span>
@@ -82,7 +83,7 @@ export function RightSidebar() {
             </div>
             
             {/* Green circle - top right, L label at top-right corner */}
-            <div className="absolute top-0 right-2">
+            <div className="absolute top-2 right-0">
               <div className="relative w-12 h-12 border-4 border-green-500 rounded-full bg-green-500/10 flex items-center justify-center">
                 <span className="text-white text-xs font-semibold">0.65</span>
                 {/* L label at top-right corner */}
@@ -91,9 +92,9 @@ export function RightSidebar() {
                 </div>
               </div>
             </div>
-            
+
             {/* Orange circle - bottom center, V label at bottom corner */}
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
+            <div className="absolute bottom-0 left-1/2 transform -translate-x-1/2">
               <div className="relative w-12 h-12 border-4 border-orange-500 rounded-full bg-orange-500/10 flex items-center justify-center">
                 <span className="text-white text-xs font-semibold">0.67</span>
                 {/* V label at bottom corner */}
