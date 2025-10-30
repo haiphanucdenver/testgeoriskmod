@@ -584,6 +584,7 @@ export function DataManagement() {
                     <Input
                       type="file"
                       className="flex-1"
+                      //accept=".docx,.json,.pdf"
                       placeholder="Choose file..."
                     />
                     <Button
