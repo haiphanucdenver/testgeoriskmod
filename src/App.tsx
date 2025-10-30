@@ -13,16 +13,35 @@ import { Toaster } from "./components/ui/sonner";
 import { FlowChart } from "./components/FlowChart";
 
 export default function App() {
+  // const [currentPage, setCurrentPage] = useState("map");
+  // const [isLoggedIn, setIsLoggedIn] = useState(true);
+
+  // const handleLogin = () => {
+  //   setIsLoggedIn(true);
+  // };
+
+  // const handleLogout = () => {
+  //   setIsLoggedIn(false);
+  //   setCurrentPage("map"); // Reset to map page after logout
+  // };
   const [currentPage, setCurrentPage] = useState("map");
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+
+  // Use persisted value, fallback to true to avoid showing login on first open.
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(() => {
+    const v = localStorage.getItem("isLoggedIn");
+    if (v !== null) return v === "true";
+    return true; // change to false if you want login shown by default on first load
+  });
 
   const handleLogin = () => {
     setIsLoggedIn(true);
+    localStorage.setItem("isLoggedIn", "true");
   };
 
   const handleLogout = () => {
     setIsLoggedIn(false);
-    setCurrentPage("map"); // Reset to map page after logout
+    setCurrentPage("map");
+    localStorage.removeItem("isLoggedIn");
   };
 
   // Show login page if not logged in
