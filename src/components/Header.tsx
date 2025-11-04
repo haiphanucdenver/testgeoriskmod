@@ -1,6 +1,7 @@
 import { Menu, User, LogOut, Download } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
+import { useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,13 +14,16 @@ interface HeaderProps {
   currentPage: string;
   onPageChange: (page: string) => void;
   onLogout: () => void;
+  onSearch?: (location: string) => void;
 }
 
 export function Header({
   currentPage,
   onPageChange,
   onLogout,
+  onSearch,
 }: HeaderProps) {
+  const [searchValue, setSearchValue] = useState("");
   const navItems = [
     { id: "map", label: "Map" },
     { id: "data", label: "Data Management" },
@@ -38,7 +42,7 @@ export function Header({
               G
             </span>
           </div>
-          <span className="text-xl font-semibold">GEORISKMOD</span>
+          <span className="text-xl font-semibold" title="A Borromean Risk Assessment Tool">GEORISKMOD</span>
         </div>
 
         <nav className="flex items-center gap-6">
@@ -63,6 +67,13 @@ export function Header({
           <Input
             placeholder="Search map..."
             className="w-48 bg-slate-700 border-slate-600 text-white placeholder:text-gray-400"
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && searchValue.trim() && onSearch) {
+                onSearch(searchValue.trim());
+              }
+            }}
           />
         )}
 
