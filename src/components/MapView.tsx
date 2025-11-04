@@ -12,7 +12,7 @@ import { fetchPopulationDensity, generatePopulationGeoJSON, PopulationPoint } fr
 
 // IMPORTANT: Replace with your actual Mapbox API key
 // You can also set this as an environment variable in .env file as VITE_MAPBOX_API_KEY
-const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY || 'YOUR_VITE_MAPBOX_API_KEY';
+const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY || 'YOUR_MAPBOX_API_KEY_HERE';
 
 interface MapViewProps {
   layers: {

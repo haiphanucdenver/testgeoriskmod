@@ -53,6 +53,3 @@ ENV/
 # OS
 .DS_Store
 Thumbs.db
-
-# AI Agents environment file
-ai_agents/.env
