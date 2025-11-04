@@ -28,9 +28,27 @@ export default function App() {
     populationDensity: false,
   });
 
+  // Search location state
+  const [searchLocation, setSearchLocation] = useState<string>("");
+
+  // Current map location state
+  const [mapLocation, setMapLocation] = useState({
+    lat: 45.3,
+    lng: -122.7,
+    zoom: 10
+  });
+
   const handleLogin = () => {
     setIsLoggedIn(true);
     localStorage.setItem("isLoggedIn", "true");
+  };
+
+  const handleSearch = (location: string) => {
+    setSearchLocation(location);
+  };
+
+  const handleLocationChange = (lat: number, lng: number, zoom: number) => {
+    setMapLocation({ lat, lng, zoom });
   };
 
   const handleLogout = () => {
@@ -68,8 +86,16 @@ export default function App() {
       default:
         return (
           <>
-            <LeftSidebar layers={layers} onLayerToggle={handleLayerToggle} />
-            <MapView layers={layers} />
+            <LeftSidebar
+              layers={layers}
+              onLayerToggle={handleLayerToggle}
+              mapLocation={mapLocation}
+            />
+            <MapView
+              layers={layers}
+              searchLocation={searchLocation}
+              onLocationChange={handleLocationChange}
+            />
           </>
         );
     }
@@ -77,10 +103,11 @@ export default function App() {
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">
-      <Header 
-        currentPage={currentPage} 
+      <Header
+        currentPage={currentPage}
         onPageChange={setCurrentPage}
         onLogout={handleLogout}
+        onSearch={handleSearch}
       />
       <div className="flex flex-1">
         {renderMainContent()}

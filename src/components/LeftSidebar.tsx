@@ -3,7 +3,7 @@ import { Checkbox } from "./ui/checkbox";
 import { Slider } from "./ui/slider";
 import { Button } from "./ui/button";
 import { ChevronDown, MapPin, Plus, Minus } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 interface LeftSidebarProps {
   layers: {
@@ -12,21 +12,67 @@ interface LeftSidebarProps {
     populationDensity: boolean;
   };
   onLayerToggle: (layer: 'riskOverlay' | 'infrastructure' | 'populationDensity') => void;
+  mapLocation: {
+    lat: number;
+    lng: number;
+    zoom: number;
+  };
 }
 
-export function LeftSidebar({ layers, onLayerToggle }: LeftSidebarProps) {
+export function LeftSidebar({ layers, onLayerToggle, mapLocation }: LeftSidebarProps) {
   const [rainfallValue, setRainfallValue] = useState([50]);
   const [temperatureValue, setTemperatureValue] = useState(0);
+  const [locationName, setLocationName] = useState<string>("Loading...");
+  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
+
+  // Fetch location name using reverse geocoding
+  useEffect(() => {
+    const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY;
+    if (!MAPBOX_API_KEY || MAPBOX_API_KEY === 'YOUR_MAPBOX_API_KEY_HERE') {
+      setLocationName("Mount Hood Area, Oregon, USA");
+      return;
+    }
+
+    // Debounce the geocoding requests to avoid too many API calls
+    const timeoutId = setTimeout(() => {
+      setIsLoadingLocation(true);
+      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${mapLocation.lng},${mapLocation.lat}.json?access_token=${MAPBOX_API_KEY}&types=place,locality,neighborhood,address`;
+
+      fetch(geocodeUrl)
+        .then(response => response.json())
+        .then(data => {
+          if (data.features && data.features.length > 0) {
+            // Get the most relevant place name
+            const feature = data.features[0];
+            setLocationName(feature.place_name || "Unknown Location");
+          } else {
+            setLocationName("Unknown Location");
+          }
+          setIsLoadingLocation(false);
+        })
+        .catch(error => {
+          console.error('Reverse geocoding error:', error);
+          setLocationName("Location unavailable");
+          setIsLoadingLocation(false);
+        });
+    }, 1000); // Wait 1 second after user stops moving the map
+
+    return () => clearTimeout(timeoutId);
+  }, [mapLocation.lat, mapLocation.lng]);
+
+  // Helper function to format coordinates
+  const formatCoordinates = (lat: number, lng: number) => {
+    const latDir = lat >= 0 ? 'N' : 'S';
+    const lngDir = lng >= 0 ? 'E' : 'W';
+    const latDeg = Math.floor(Math.abs(lat));
+    const latMin = Math.floor((Math.abs(lat) - latDeg) * 60);
+    const lngDeg = Math.floor(Math.abs(lng));
+    const lngMin = Math.floor((Math.abs(lng) - lngDeg) * 60);
+    return `${latDeg}°${latMin}'${latDir}, ${lngDeg}°${lngMin}'${lngDir}`;
+  };
 
   return (
     <div className="w-64 bg-slate-900 text-white p-4 space-y-6 overflow-y-auto h-full">
-      {/* Borromean Risk Assessment Title */}
-      <div className="bg-slate-800 px-4 py-2 rounded">
-        <h2 className="text-lg font-semibold">
-          Borromean Risk Assessment
-        </h2>
-      </div>
-
       {/* Controls & Scenarios Section */}
       <div className="space-y-4">
         <h2 className="text-lg font-semibold bg-slate-800 px-4 py-2 rounded">
@@ -156,12 +202,21 @@ export function LeftSidebar({ layers, onLayerToggle }: LeftSidebarProps) {
           <div className="flex items-center gap-2 mb-2">
             <MapPin className="h-4 w-4 text-blue-400" />
             <span className="text-sm font-medium text-gray-200">Current Location</span>
+            {isLoadingLocation && (
+              <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-blue-400 ml-auto"></div>
+            )}
           </div>
           <div className="text-xs text-gray-400 space-y-1">
-            <div>Address: Mountain Ridge, British Columbia, Canada</div>
-            <div>Coordinates: 45°18'N, 122°42'W</div>
-            <div>Elevation: 1,250m</div>
-            <div>Area: 15.2 km²</div>
+            <div className="flex items-start gap-1">
+              <span className="text-gray-500">Address:</span>
+              <span className="flex-1">{locationName}</span>
+            </div>
+            <div>
+              <span className="text-gray-500">Coordinates:</span> {formatCoordinates(mapLocation.lat, mapLocation.lng)}
+            </div>
+            <div>
+              <span className="text-gray-500">Zoom Level:</span> {mapLocation.zoom.toFixed(1)}x
+            </div>
           </div>
         </div>
       </div>
