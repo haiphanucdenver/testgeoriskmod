@@ -5,12 +5,28 @@ import { Button } from "./ui/button";
 import { ChevronDown, MapPin, Plus, Minus } from "lucide-react";
 import { useState } from "react";
 
-export function LeftSidebar() {
+interface LeftSidebarProps {
+  layers: {
+    riskOverlay: boolean;
+    infrastructure: boolean;
+    populationDensity: boolean;
+  };
+  onLayerToggle: (layer: 'riskOverlay' | 'infrastructure' | 'populationDensity') => void;
+}
+
+export function LeftSidebar({ layers, onLayerToggle }: LeftSidebarProps) {
   const [rainfallValue, setRainfallValue] = useState([50]);
   const [temperatureValue, setTemperatureValue] = useState(0);
 
   return (
     <div className="w-64 bg-slate-900 text-white p-4 space-y-6 overflow-y-auto h-full">
+      {/* Borromean Risk Assessment Title */}
+      <div className="bg-slate-800 px-4 py-2 rounded">
+        <h2 className="text-lg font-semibold">
+          Borromean Risk Assessment
+        </h2>
+      </div>
+
       {/* Controls & Scenarios Section */}
       <div className="space-y-4">
         <h2 className="text-lg font-semibold bg-slate-800 px-4 py-2 rounded">
@@ -25,15 +41,31 @@ export function LeftSidebar() {
         {/* Risk Overlay */}
         <div className="flex items-center justify-between pl-6">
           <span className="text-sm">Risk Overlay</span>
-          <div className="w-4 h-4 bg-blue-500 rounded-full"></div>
+          <Checkbox
+            id="risk-overlay"
+            checked={layers.riskOverlay}
+            onCheckedChange={() => onLayerToggle('riskOverlay')}
+          />
         </div>
 
         {/* Infrastructure */}
-        <div className="pl-6 text-gray-300 text-sm">Infrastructure</div>
+        <div className="flex items-center justify-between pl-6">
+          <span className="text-sm">Infrastructure</span>
+          <Checkbox
+            id="infrastructure"
+            checked={layers.infrastructure}
+            onCheckedChange={() => onLayerToggle('infrastructure')}
+          />
+        </div>
 
         {/* Population Density */}
-        <div className="pl-6 text-gray-300 text-sm">
-          Population Density
+        <div className="flex items-center justify-between pl-6">
+          <span className="text-sm">Population Density</span>
+          <Checkbox
+            id="population-density"
+            checked={layers.populationDensity}
+            onCheckedChange={() => onLayerToggle('populationDensity')}
+          />
         </div>
       </div>
 
@@ -130,6 +162,30 @@ export function LeftSidebar() {
             <div>Coordinates: 45°18'N, 122°42'W</div>
             <div>Elevation: 1,250m</div>
             <div>Area: 15.2 km²</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Assessment Components Section */}
+      <div className="space-y-4 border-t border-gray-700 pt-4">
+        <h3 className="font-semibold text-gray-200">
+          Assessment Components
+        </h3>
+
+        <div className="space-y-4 text-xs text-gray-300">
+          <div>
+            <div className="font-semibold text-gray-200 mb-1">Event Drivers (H)</div>
+            <p>A normalized score [0,1] representing the likelihood of a hazardous event based on physical conditions.</p>
+          </div>
+
+          <div>
+            <div className="font-semibold text-gray-200 mb-1">Local Lore & History (L)</div>
+            <p>A normalized score [0,1] representing the strength of place-based historical and anecdotal evidence for past events.</p>
+          </div>
+
+          <div>
+            <div className="font-semibold text-gray-200 mb-1">Vulnerability (V)</div>
+            <p>A normalized score [0,1] representing the potential consequences based on the exposure, fragility, and criticality of assets.</p>
           </div>
         </div>
       </div>

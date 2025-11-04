@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Header } from "./components/Header";
 import { LeftSidebar } from "./components/LeftSidebar";
 import { MapView } from "./components/MapView";
-import { RightSidebar } from "./components/RightSidebar";
 import { DataManagement } from "./components/DataManagement";
 import { Account } from "./components/Account";
 import { Settings } from "./components/Settings";
@@ -13,17 +12,6 @@ import { Toaster } from "./components/ui/sonner";
 import { FlowChart } from "./components/FlowChart";
 
 export default function App() {
-  // const [currentPage, setCurrentPage] = useState("map");
-  // const [isLoggedIn, setIsLoggedIn] = useState(true);
-
-  // const handleLogin = () => {
-  //   setIsLoggedIn(true);
-  // };
-
-  // const handleLogout = () => {
-  //   setIsLoggedIn(false);
-  //   setCurrentPage("map"); // Reset to map page after logout
-  // };
   const [currentPage, setCurrentPage] = useState("map");
 
   // Use persisted value, fallback to true to avoid showing login on first open.
@@ -31,6 +19,13 @@ export default function App() {
     const v = localStorage.getItem("isLoggedIn");
     if (v !== null) return v === "true";
     return true; // change to false if you want login shown by default on first load
+  });
+
+  // Layer visibility state - start with only risk overlay visible
+  const [layers, setLayers] = useState({
+    riskOverlay: true,
+    infrastructure: false,
+    populationDensity: false,
   });
 
   const handleLogin = () => {
@@ -42,6 +37,13 @@ export default function App() {
     setIsLoggedIn(false);
     setCurrentPage("map");
     localStorage.removeItem("isLoggedIn");
+  };
+
+  const handleLayerToggle = (layer: 'riskOverlay' | 'infrastructure' | 'populationDensity') => {
+    setLayers((prev) => ({
+      ...prev,
+      [layer]: !prev[layer],
+    }));
   };
 
   // Show login page if not logged in
@@ -66,9 +68,8 @@ export default function App() {
       default:
         return (
           <>
-            <LeftSidebar />
-            <MapView />
-            <RightSidebar />
+            <LeftSidebar layers={layers} onLayerToggle={handleLayerToggle} />
+            <MapView layers={layers} />
           </>
         );
     }

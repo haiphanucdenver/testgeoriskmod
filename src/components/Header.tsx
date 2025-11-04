@@ -1,4 +1,4 @@
-import { Menu, User, LogOut } from "lucide-react";
+import { Menu, User, LogOut, Download } from "lucide-react";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import {
@@ -64,6 +64,16 @@ export function Header({
             placeholder="Search map..."
             className="w-48 bg-slate-700 border-slate-600 text-white placeholder:text-gray-400"
           />
+        )}
+
+        {currentPage === "map" && (
+          <Button
+            variant="outline"
+            className="bg-slate-700 border-slate-600 text-white hover:bg-slate-600 hover:text-white"
+          >
+            <Download className="h-4 w-4 mr-2" />
+            Download Report
+          </Button>
         )}
 
         <DropdownMenu>
