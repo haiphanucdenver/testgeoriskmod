@@ -403,7 +403,7 @@ export function DataManagement() {
               </div>
 
               <div className="space-y-4">
-                <div>
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Cartorivianas
                   </label>
@@ -420,19 +420,19 @@ export function DataManagement() {
                       ⚙️
                     </Button>
                   </div>
-                </div>
+                </div> */}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Oral Histories
+                    Lore Narrative
                   </label>
                   <Input
                     className="w-full"
-                    placeholder="Enter oral histories..."
+                    placeholder="Enter lore narrative..."
                   />
                 </div>
 
-                <div>
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Oral Histories (Text)
                   </label>
@@ -440,9 +440,9 @@ export function DataManagement() {
                     className="w-full"
                     placeholder="Enter text..."
                   />
-                </div>
+                </div> */}
 
-                <div>
+                {/* <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Historical Text (georeferenced)
                   </label>
@@ -450,25 +450,25 @@ export function DataManagement() {
                     className="w-full"
                     placeholder="Enter historical text..."
                   />
-                </div>
+                </div> */}
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Community Stories
+                    Location Name
                   </label>
                   <Input
                     className="w-full"
-                    placeholder="Enter community stories..."
+                    placeholder="Enter location name..."
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Community Stories (JSON)
+                    Enter Date
                   </label>
                   <Input
                     className="w-full"
-                    placeholder="Upload JSON file..."
+                    placeholder="Enter date..."
                   />
                 </div>
 
