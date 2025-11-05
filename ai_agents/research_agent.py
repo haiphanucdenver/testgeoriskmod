@@ -155,7 +155,7 @@ Begin your research now. Be thorough and systematic."""
                     }
                 ],
                 temperature=0.3,  # Slightly higher for more creative research
-                max_tokens=4000
+                max_tokens=1000 # Should be 4000
             )
             
             # Extract and parse response

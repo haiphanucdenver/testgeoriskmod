@@ -9,10 +9,10 @@ class Config:
     #OPENAI_MODEL = "o1-preview"  # Reasoning model
     OPENAI_MODEL = "gpt-5"  # check model
     #OPENAI_RESEARCH_MODEL = "gpt-4-turbo-preview"  # For deep research
-    OPENAI_RESEARCH_MODEL = "gpt-5-browsing"  # check model
+    OPENAI_RESEARCH_MODEL = "gpt-4o"  # check model or (gpt-5-mini-browsing)   "gpt-5-browsing" 
     
     # Agent Configuration
-    MAX_TOKENS = 4000
+    MAX_TOKENS = 1000 # Should be 4000
     TEMPERATURE = 0.2  # Lower for more deterministic extraction
     
     # Local Lore Scoring Weights
