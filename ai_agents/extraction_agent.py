@@ -17,6 +17,7 @@ class DocumentExtractionAgent:
     #     self.client = OpenAI(api_key=api_key or Config.OPENAI_API_KEY)
     #     self.calculator = LoreScoreCalculator()
     #     self.model = Config.OPENAI_MODEL
+
     def __init__(self, api_key: Optional[str] = None):
         # If a proxy is configured in Config, export it as environment variables
         # so underlying HTTP libraries use it instead of passing a 'proxies' kw.
@@ -51,7 +52,7 @@ TEXT TO ANALYZE:
 {f"LOCATION CONTEXT: {location_context}" if location_context else ""}
 
 EXTRACTION REQUIREMENTS:
-Extract ALL mentions of historical mass movement events (landslides, debris flows, rockfalls, lava flows, mudflows, etc.) and structure the data as follows:
+Extract ALL mentions of historical mass movement events (landslides, debris flows, rockfalls, lava flows, mudflows) and structure the data as follows:
 
 For EACH event mentioned, extract:
 
@@ -226,7 +227,19 @@ if __name__ == "__main__":
     - Local oral traditions spoke of "angry mountain" events every few generations
     - In 1595, indigenous records mention devastating flows from the volcano
     """
-    
+    test_text_2= """
+    Long ago, in the valley of Armero, people lived beneath a sacred mountain named Ruiz.
+    They believed the mountain held the spirit of an ancient god whose crown was made of white ice.
+
+    The elders warned that every few generations, the god would awaken in sorrow. When he wept, his tears turned to black rivers that rushed across the land.
+
+    Many centuries ago, the mountain cried and flooded the valley. The ancestors recorded the disaster, and stories passed through families like whispers: “When Ruiz mourns, the earth drowns.”
+
+    Later, the sorrow returned. One night, when the people slept, the god’s icy crown melted. A great wave of mud swept away the town below. Many lives were lost, and the valley grew silent.
+
+    Today, villagers say the stars above Armero are the souls of those taken, shining to comfort the Weeping Mountain. Some still warn that if the god cries again, the earth will remember.
+    """
+
     agent = DocumentExtractionAgent()
     
     request = ExtractionRequest(
