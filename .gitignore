@@ -56,5 +56,3 @@ Thumbs.db
 
 # AI Agents environment file
 ai_agents/.env
-ai_agents/venv/
-ai_agents/uploads/
