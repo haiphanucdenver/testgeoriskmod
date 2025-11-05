@@ -16,7 +16,7 @@ from extraction_agent import DocumentExtractionAgent
 from research_agent import DeepResearchAgent
 from file_processor import FileProcessor
 from config import Config
-
+  
 # Initialize FastAPI app
 app = FastAPI(
     title="Borromean Risk - Local Lore AI Agents",
