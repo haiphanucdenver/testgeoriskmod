@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Header } from "./components/Header";
 import { LeftSidebar } from "./components/LeftSidebar";
+import { RightSidebar } from "./components/RightSidebar";
 import { MapView } from "./components/MapView";
 import { DataManagement } from "./components/DataManagement";
 import { Account } from "./components/Account";
@@ -38,6 +39,14 @@ export default function App() {
     zoom: 10
   });
 
+  // Area selection state
+  const [areaSelectionMode, setAreaSelectionMode] = useState<'none' | 'centerPoint' | 'fourVertices'>('none');
+  const [selectedCenterPoint, setSelectedCenterPoint] = useState<{ lat: number; lng: number } | null>(null);
+  const [selectedVertices, setSelectedVertices] = useState<Array<{ lat: number; lng: number }>>([]);
+
+  // Risk calculation results state
+  const [riskData, setRiskData] = useState<any>(null);
+
   const handleLogin = () => {
     setIsLoggedIn(true);
     localStorage.setItem("isLoggedIn", "true");
@@ -64,6 +73,35 @@ export default function App() {
     }));
   };
 
+  const handleAreaSelectionModeChange = (mode: 'none' | 'centerPoint' | 'fourVertices') => {
+    setAreaSelectionMode(mode);
+    // Clear selected point when changing modes
+    if (mode !== 'centerPoint') {
+      setSelectedCenterPoint(null);
+    }
+    // Clear vertices when entering fourVertices mode to start fresh
+    if (mode === 'fourVertices') {
+      setSelectedVertices([]);
+    }
+  };
+
+  const handleCenterPointSelect = (lat: number, lng: number) => {
+    setSelectedCenterPoint({ lat, lng });
+    // Auto-exit selection mode after selecting a point
+    setAreaSelectionMode('none');
+  };
+
+  const handleVertexSelect = (lat: number, lng: number) => {
+    setSelectedVertices(prev => {
+      const newVertices = [...prev, { lat, lng }];
+      // Auto-exit after 4 vertices are selected
+      if (newVertices.length === 4) {
+        setAreaSelectionMode('none');
+      }
+      return newVertices;
+    });
+  };
+
   // Show login page if not logged in
   if (!isLoggedIn) {
     return <Login onLogin={handleLogin} />;
@@ -72,7 +110,7 @@ export default function App() {
   const renderMainContent = () => {
     switch (currentPage) {
       case "data":
-        return <DataManagement />;
+        return <DataManagement mapLocation={mapLocation} onRiskCalculated={setRiskData} />;
       case "account":
         return <Account onLogout={handleLogout} />;
       case "settings":
@@ -90,12 +128,22 @@ export default function App() {
               layers={layers}
               onLayerToggle={handleLayerToggle}
               mapLocation={mapLocation}
+              areaSelectionMode={areaSelectionMode}
+              onAreaSelectionModeChange={handleAreaSelectionModeChange}
+              selectedVertices={selectedVertices}
             />
             <MapView
               layers={layers}
               searchLocation={searchLocation}
               onLocationChange={handleLocationChange}
+              areaSelectionMode={areaSelectionMode}
+              selectedCenterPoint={selectedCenterPoint}
+              onCenterPointSelect={handleCenterPointSelect}
+              selectedVertices={selectedVertices}
+              onVertexSelect={handleVertexSelect}
+              riskData={riskData}
             />
+            <RightSidebar />
           </>
         );
     }

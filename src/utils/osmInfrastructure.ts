@@ -68,7 +68,7 @@ function buildOverpassQuery(
     }
   });
 
-  query += ');\nout center;';
+  query += ');\nout center tags;';
 
   return query;
 }
@@ -92,9 +92,11 @@ function parseOSMElement(element: any, categoryKey: string): InfrastructurePoint
     return null;
   }
 
-  // Get name
+  // Get name with fallback priority
   const name = element.tags?.name ||
                element.tags?.['name:en'] ||
+               element.tags?.official_name ||
+               element.tags?.operator || // Use operator as name if no name exists
                getDefaultName(element.tags, categoryKey);
 
   // Get type from tags
@@ -110,12 +112,51 @@ function parseOSMElement(element: any, categoryKey: string): InfrastructurePoint
 
   // Additional info
   const additionalInfo: Record<string, string> = {};
-  if (element.tags?.operator) additionalInfo.operator = element.tags.operator;
-  if (element.tags?.['addr:full']) additionalInfo.address = element.tags['addr:full'];
-  if (element.tags?.phone) additionalInfo.phone = element.tags.phone;
-  if (element.tags?.website) additionalInfo.website = element.tags.website;
+
+  // Only show operator if it's different from the name
+  if (element.tags?.operator && element.tags?.operator !== name) {
+    additionalInfo.operator = element.tags.operator;
+  }
+
+  // Extract address with multiple fallbacks
+  if (element.tags?.['addr:full']) {
+    additionalInfo.address = element.tags['addr:full'];
+  } else if (element.tags?.['addr:street'] && element.tags?.['addr:housenumber']) {
+    const street = element.tags['addr:housenumber'] + ' ' + element.tags['addr:street'];
+    const city = element.tags?.['addr:city'] || '';
+    const state = element.tags?.['addr:state'] || '';
+    additionalInfo.address = [street, city, state].filter(Boolean).join(', ');
+  }
+
+  // Extract phone with multiple fallbacks
+  if (element.tags?.phone) {
+    additionalInfo.phone = element.tags.phone;
+  } else if (element.tags?.['contact:phone']) {
+    additionalInfo.phone = element.tags['contact:phone'];
+  } else if (element.tags?.['phone:mobile']) {
+    additionalInfo.phone = element.tags['phone:mobile'];
+  }
+
+  // Extract website with fallback
+  if (element.tags?.website) {
+    additionalInfo.website = element.tags.website;
+  } else if (element.tags?.['contact:website']) {
+    additionalInfo.website = element.tags['contact:website'];
+  } else if (element.tags?.url) {
+    additionalInfo.website = element.tags.url;
+  }
+
+  // Extract email if available
+  if (element.tags?.email) {
+    additionalInfo.email = element.tags.email;
+  } else if (element.tags?.['contact:email']) {
+    additionalInfo.email = element.tags['contact:email'];
+  }
+
   if (element.tags?.beds) additionalInfo.beds = element.tags.beds;
   if (element.tags?.emergency) additionalInfo.emergency = element.tags.emergency;
+  if (element.tags?.capacity) additionalInfo.capacity = element.tags.capacity;
+  if (element.tags?.description) additionalInfo.description = element.tags.description;
 
   return {
     name,

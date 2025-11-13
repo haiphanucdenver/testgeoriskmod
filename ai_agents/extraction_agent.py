@@ -138,8 +138,8 @@ JSON OUTPUT:"""
                         "content": prompt
                     }
                 ],
-                temperature=Config.TEMPERATURE,
-                max_tokens=Config.MAX_TOKENS
+                #temperature=Config.TEMPERATURE,
+                max_completion_tokens=Config.MAX_TOKENS
             )
             
             # Extract response content
@@ -223,22 +223,18 @@ if __name__ == "__main__":
     23,000 people died, making it one of the deadliest volcanic disasters in history.
     
     Previous events in the area:
-    - In 1845, a similar but smaller lahar affected the region
-    - Local oral traditions spoke of "angry mountain" events every few generations
-    - In 1595, indigenous records mention devastating flows from the volcano
+    - In 1845, a similar but smaller lahar affected the region.
+    - Local oral traditions spoke of "angry god" mountain events every few generations.
     """
-    test_text_2= """
-    Long ago, in the valley of Armero, people lived beneath a sacred mountain named Ruiz.
+
+
+    test_text_2 = """
+    Long ago, in the valley of Armero, indigenous people lived beneath a sacred mountain named Ruiz.
     They believed the mountain held the spirit of an ancient god whose crown was made of white ice.
-
-    The elders warned that every few generations, the god would awaken in sorrow. When he wept, his tears turned to black rivers that rushed across the land.
-
-    Many centuries ago, the mountain cried and flooded the valley. The ancestors recorded the disaster, and stories passed through families like whispers: “When Ruiz mourns, the earth drowns.”
-
-    Later, the sorrow returned. One night, when the people slept, the god’s icy crown melted. A great wave of mud swept away the town below. Many lives were lost, and the valley grew silent.
-
-    Today, villagers say the stars above Armero are the souls of those taken, shining to comfort the Weeping Mountain. Some still warn that if the god cries again, the earth will remember.
+    A few centuries ago, the god returned near the center of the village, he made a great wave of mud swept away the town below. Many lives were lost, and the valley grew silent.
+    Today, villagers still warn that if the god gets angry again, the earth will remember.
     """
+    print("Extraction AI agent is processing...\n")
 
     agent = DocumentExtractionAgent()
     

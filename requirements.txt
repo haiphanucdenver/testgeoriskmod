@@ -1,0 +1,24 @@
+# GeoRiskMod Backend Requirements
+
+# Web Framework
+fastapi==0.115.0
+uvicorn[standard]==0.32.0
+
+# Database
+psycopg2-binary==2.9.11
+python-dotenv==1.2.1
+
+# Data Validation
+pydantic==2.10.0
+python-multipart==0.0.18
+
+# Geospatial Processing (for DEM processing)
+# Note: GDAL can be tricky to install. Try one of these methods:
+# - Conda: conda install -c conda-forge gdal
+# - Ubuntu/Debian: apt-get install python3-gdal
+# - macOS: brew install gdal && pip install gdal
+# - Or use pre-built wheels from https://www.lfd.uci.edu/~gohlke/pythonlibs/
+GDAL==3.8.0  # May need system GDAL libraries installed first
+rasterio==1.4.3
+scipy==1.14.1
+numpy==2.2.0

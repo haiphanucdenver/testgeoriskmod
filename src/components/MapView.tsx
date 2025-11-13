@@ -1,16 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
 import mapboxgl from 'mapbox-gl';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "./ui/dialog";
+import { fetchOSMInfrastructure, InfrastructurePoint } from '../utils/osmInfrastructure';
+import { fetchPopulationDensity, generatePopulationGeoJSON, PopulationPoint } from '../utils/populationDensity';
 
 // IMPORTANT: Replace with your actual Mapbox API key
 // You can also set this as an environment variable in .env file as VITE_MAPBOX_API_KEY
-const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY || 'YOUR_MAPBOX';
+const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY || 'YOUR_MAPBOX_API_KEY_HERE';
+
+interface RiskData {
+  R_score: number;
+  risk_level: string;
+  H_score: number;
+  L_score: number;
+  V_score: number;
+  location?: {
+    latitude: number;
+    longitude: number;
+  };
+}
 
 interface MapViewProps {
   layers: {
@@ -18,17 +25,64 @@ interface MapViewProps {
     infrastructure: boolean;
     populationDensity: boolean;
   };
+  searchLocation?: string;
+  onLocationChange?: (lat: number, lng: number, zoom: number) => void;
+  areaSelectionMode: 'none' | 'centerPoint' | 'fourVertices';
+  selectedCenterPoint: { lat: number; lng: number } | null;
+  onCenterPointSelect: (lat: number, lng: number) => void;
+  selectedVertices: Array<{ lat: number; lng: number }>;
+  onVertexSelect: (lat: number, lng: number) => void;
+  riskData?: RiskData | null;
 }
 
-export function MapView({ layers }: MapViewProps) {
+export function MapView({ layers, searchLocation, onLocationChange, areaSelectionMode, selectedCenterPoint, onCenterPointSelect, selectedVertices, onVertexSelect, riskData }: MapViewProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const centerPointMarkerRef = useRef<mapboxgl.Marker | null>(null);
+  const vertexMarkersRef = useRef<mapboxgl.Marker[]>([]);
+  const activePopupsRef = useRef<Array<{ popup: mapboxgl.Popup; lngLat: [number, number] }>>([]);
+  const hoverPopupsRef = useRef<{
+    risk: mapboxgl.Popup[];
+    infrastructure: mapboxgl.Popup[];
+    population: mapboxgl.Popup[];
+  }>({ risk: [], infrastructure: [], population: [] });
   const [lng, setLng] = useState(-122.7);
   const [lat, setLat] = useState(45.3);
   const [zoom, setZoom] = useState(10);
   const [currentElevation, setCurrentElevation] = useState(1250);
-  const [showFormulaDialog, setShowFormulaDialog] = useState(false);
+  const [infrastructureData, setInfrastructureData] = useState<InfrastructurePoint[]>([]);
+  const [isLoadingInfrastructure, setIsLoadingInfrastructure] = useState(false);
+  const [populationData, setPopulationData] = useState<PopulationPoint[]>([]);
+  const [isLoadingPopulation, setIsLoadingPopulation] = useState(false);
+  const [mapLoaded, setMapLoaded] = useState(false);
+
+  // Helper function to check if two coordinates are close to each other
+  const areCoordinatesClose = (coord1: [number, number], coord2: [number, number], threshold = 0.001) => {
+    const [lng1, lat1] = coord1;
+    const [lng2, lat2] = coord2;
+    return Math.abs(lng1 - lng2) < threshold && Math.abs(lat1 - lat2) < threshold;
+  };
+
+  // Helper function to clear hover popups by type
+  const clearHoverPopups = (type: 'risk' | 'infrastructure' | 'population') => {
+    hoverPopupsRef.current[type].forEach(popup => popup.remove());
+    hoverPopupsRef.current[type] = [];
+  };
+
+  // Calculate offset for popup - single popup appears above the marker
+  const calculatePopupOffset = (index: number = 0): [number, number] => {
+    if (index === 0) {
+      // First popup appears directly above with arrow pointing down at marker
+      return [0, -10];
+    }
+    // Additional popups offset horizontally
+    const minSpacing = 20;
+    const popupWidth = 250;
+    const offsetX = index * (popupWidth + minSpacing);
+    const offsetY = -10;
+    return [offsetX, offsetY];
+  };
 
   useEffect(() => {
     if (!mapContainer.current) return;
@@ -115,97 +169,33 @@ export function MapView({ layers }: MapViewProps) {
         labelLayerId
       );
 
-      // Add sample risk overlay zones (GeoJSON)
+      // Add risk overlay zones (initially empty, will be updated when risk is calculated)
       map.current.addSource('risk-zones', {
         type: 'geojson',
         data: {
           type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              properties: {
-                name: 'Mountain Ridge',
-                riskLevel: 'High',
-                riskScore: 7.2,
-                hazards: 'Landslide, Avalanche',
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [
-                  [
-                    [-122.75, 45.35],
-                    [-122.65, 45.35],
-                    [-122.65, 45.28],
-                    [-122.75, 45.28],
-                    [-122.75, 45.35],
-                  ],
-                ],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: {
-                name: 'North Valley',
-                riskLevel: 'Medium',
-                riskScore: 4.5,
-                hazards: 'Flooding',
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [
-                  [
-                    [-122.72, 45.38],
-                    [-122.62, 45.38],
-                    [-122.62, 45.33],
-                    [-122.72, 45.33],
-                    [-122.72, 45.38],
-                  ],
-                ],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: {
-                name: 'Central Area',
-                riskLevel: 'Low',
-                riskScore: 2.1,
-                hazards: 'None identified',
-              },
-              geometry: {
-                type: 'Polygon',
-                coordinates: [
-                  [
-                    [-122.68, 45.32],
-                    [-122.58, 45.32],
-                    [-122.58, 45.25],
-                    [-122.68, 45.25],
-                    [-122.68, 45.32],
-                  ],
-                ],
-              },
-            },
-          ],
+          features: [],
         },
       });
 
-      // Add risk overlay layer with color coding
+      // Add risk overlay layer with interpolated color coding (red-yellow-green)
+      // 0-0.33: green, 0.33-0.66: yellow, 0.66-1.0: red
       map.current.addLayer({
         id: 'risk-overlay',
         type: 'fill',
         source: 'risk-zones',
         paint: {
           'fill-color': [
-            'match',
-            ['get', 'riskLevel'],
-            'High',
-            '#ef4444', // Red for high risk
-            'Medium',
-            '#f59e0b', // Orange for medium risk
-            'Low',
-            '#22c55e', // Green for low risk
-            '#6b7280', // Gray default
+            'interpolate',
+            ['linear'],
+            ['get', 'riskScore'], // Use normalized 0-1 score
+            0, '#22c55e',    // Green (low risk)
+            0.33, '#84cc16', // Light green
+            0.5, '#eab308',  // Yellow (medium risk)
+            0.66, '#f59e0b', // Orange
+            1, '#ef4444',    // Red (high risk)
           ],
-          'fill-opacity': 0.4,
+          'fill-opacity': 0.5,
         },
       });
 
@@ -220,97 +210,38 @@ export function MapView({ layers }: MapViewProps) {
         },
       });
 
-      // Add sample infrastructure markers (stored in ref for later toggle control)
-      const infrastructurePoints = [
-        {
-          name: 'Hospital',
-          type: 'medical',
-          coordinates: [-122.7, 45.3],
-          icon: '🏥',
-        },
-        {
-          name: 'School',
-          type: 'education',
-          coordinates: [-122.68, 45.32],
-          icon: '🏫',
-        },
-        {
-          name: 'Power Station',
-          type: 'utilities',
-          coordinates: [-122.72, 45.35],
-          icon: '⚡',
-        },
-      ];
+      // Fetch infrastructure data from OpenStreetMap
+      setIsLoadingInfrastructure(true);
+      fetchOSMInfrastructure([lng, lat], 20) // 20km radius
+        .then(data => {
+          setInfrastructureData(data);
+          setIsLoadingInfrastructure(false);
+          console.log(`Loaded ${data.length} infrastructure points from OSM`);
+        })
+        .catch(error => {
+          console.error('Failed to fetch infrastructure:', error);
+          setIsLoadingInfrastructure(false);
+        });
 
-      infrastructurePoints.forEach((point) => {
-        const el = document.createElement('div');
-        el.className = 'infrastructure-marker';
-        el.innerHTML = point.icon;
-        el.style.fontSize = '24px';
-        el.style.cursor = 'pointer';
+      // Fetch population density data from OpenStreetMap
+      setIsLoadingPopulation(true);
+      fetchPopulationDensity([lng, lat], 50) // 50km radius for population data
+        .then(data => {
+          setPopulationData(data);
+          setIsLoadingPopulation(false);
+          console.log(`Loaded ${data.length} population points from OSM`);
+        })
+        .catch(error => {
+          console.error('Failed to fetch population data:', error);
+          setIsLoadingPopulation(false);
+        });
 
-        const marker = new mapboxgl.Marker(el)
-          .setLngLat(point.coordinates as [number, number])
-          .setPopup(
-            new mapboxgl.Popup({ offset: 25 }).setHTML(
-              `<div style="color: #000; padding: 8px;">
-                <h3 style="font-weight: bold; margin-bottom: 4px;">${point.name}</h3>
-                <p style="font-size: 12px; color: #666;">Type: ${point.type}</p>
-              </div>`
-            )
-          );
-
-        // Store marker reference for later control
-        markersRef.current.push(marker);
-      });
-
-      // Add population density heatmap layer
+      // Initialize population density source with empty data (will be updated when data loads)
       map.current.addSource('population-density', {
         type: 'geojson',
         data: {
           type: 'FeatureCollection',
-          features: [
-            {
-              type: 'Feature',
-              properties: { density: 150 }, // people per km²
-              geometry: {
-                type: 'Point',
-                coordinates: [-122.7, 45.3],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: { density: 300 },
-              geometry: {
-                type: 'Point',
-                coordinates: [-122.68, 45.32],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: { density: 450 },
-              geometry: {
-                type: 'Point',
-                coordinates: [-122.72, 45.35],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: { density: 200 },
-              geometry: {
-                type: 'Point',
-                coordinates: [-122.65, 45.28],
-              },
-            },
-            {
-              type: 'Feature',
-              properties: { density: 100 },
-              geometry: {
-                type: 'Point',
-                coordinates: [-122.75, 45.38],
-              },
-            },
-          ],
+          features: []
         },
       });
 
@@ -318,20 +249,30 @@ export function MapView({ layers }: MapViewProps) {
         id: 'population-heatmap',
         type: 'heatmap',
         source: 'population-density',
+        layout: {
+          visibility: 'none' // Hidden by default
+        },
         paint: {
-          // Increase weight as density increases
+          // Use logarithmic weight based on population
           'heatmap-weight': [
             'interpolate',
             ['linear'],
-            ['get', 'density'],
+            ['get', 'weight'], // Use pre-calculated logarithmic weight
             0,
             0,
-            500,
+            10,
             1,
           ],
           // Increase intensity as zoom level increases
-          'heatmap-intensity': ['interpolate', ['linear'], ['zoom'], 0, 1, 15, 3],
-          // Color ramp for heatmap
+          'heatmap-intensity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            0, 0.5,
+            9, 1,
+            15, 2
+          ],
+          // Color ramp for heatmap - blue (low) to red (high) population
           'heatmap-color': [
             'interpolate',
             ['linear'],
@@ -349,32 +290,143 @@ export function MapView({ layers }: MapViewProps) {
             1,
             'rgb(178,24,43)',
           ],
-          // Radius of heatmap points
-          'heatmap-radius': ['interpolate', ['linear'], ['zoom'], 0, 20, 15, 40],
-          // Decrease opacity to transition into circle layer
-          'heatmap-opacity': 0.7,
+          // Radius of heatmap points - larger radius for better visualization
+          'heatmap-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            0, 10,
+            9, 30,
+            15, 60
+          ],
+          // Opacity
+          'heatmap-opacity': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            7, 0.8,
+            15, 0.6
+          ],
         },
       });
+
+      // Add circle layer for individual population points (visible on hover)
+      map.current.addLayer({
+        id: 'population-points',
+        type: 'circle',
+        source: 'population-density',
+        layout: {
+          visibility: 'none' // Hidden by default
+        },
+        paint: {
+          'circle-radius': [
+            'interpolate',
+            ['linear'],
+            ['zoom'],
+            8, 4,
+            12, 8,
+            15, 12
+          ],
+          'circle-color': [
+            'interpolate',
+            ['linear'],
+            ['get', 'weight'],
+            0, 'rgb(103,169,207)',
+            5, 'rgb(239,138,98)',
+            10, 'rgb(178,24,43)'
+          ],
+          'circle-opacity': 0.6,
+          'circle-stroke-width': 0,
+          'circle-stroke-color': 'transparent'
+        },
+      });
+
+      // Add hover interaction for population points - show popup for specific point
+      map.current.on('mouseenter', 'population-points', (e) => {
+        if (!map.current || !e.features || e.features.length === 0) return;
+
+        // Change cursor to pointer
+        map.current.getCanvas().style.cursor = 'pointer';
+
+        // Clear any existing population hover popups only
+        clearHoverPopups('population');
+
+        // Show popup only for the specific point being hovered over
+        const feature = e.features[0];
+        const coordinates = (feature.geometry as any).coordinates.slice();
+        const properties = feature.properties;
+        const offset = calculatePopupOffset(0);
+
+        const popup = new mapboxgl.Popup({
+          offset: offset,
+          closeButton: false
+        })
+          .setLngLat(coordinates)
+          .setHTML(
+            `<div style="color: #000; padding: 8px; min-width: 150px;">
+              <h3 style="font-weight: bold; margin-bottom: 4px;">${properties?.name || 'Population Point'}</h3>
+              <p style="font-size: 12px; color: #666; margin-bottom: 4px;">Population: ${properties?.population ? parseInt(properties.population).toLocaleString() : 'N/A'}</p>
+              <p style="font-size: 11px; color: #888;">Type: ${properties?.placeType || 'N/A'}</p>
+            </div>`
+          )
+          .addTo(map.current!);
+
+        // Track this hover popup by type
+        hoverPopupsRef.current.population.push(popup);
+      });
+
+      map.current.on('mouseleave', 'population-points', () => {
+        if (map.current) {
+          map.current.getCanvas().style.cursor = '';
+        }
+
+        // Close population hover popups only when mouse leaves
+        clearHoverPopups('population');
+      });
+
+      // Mark map as fully loaded
+      setMapLoaded(true);
     });
 
     // Update coordinates display on map move
     map.current.on('move', () => {
       if (!map.current) return;
       const center = map.current.getCenter();
-      setLng(parseFloat(center.lng.toFixed(4)));
-      setLat(parseFloat(center.lat.toFixed(4)));
-      setZoom(parseFloat(map.current.getZoom().toFixed(2)));
+      const newLng = parseFloat(center.lng.toFixed(4));
+      const newLat = parseFloat(center.lat.toFixed(4));
+      const newZoom = parseFloat(map.current.getZoom().toFixed(2));
+      setLng(newLng);
+      setLat(newLat);
+      setZoom(newZoom);
+
+      // Notify parent component of location change
+      if (onLocationChange) {
+        onLocationChange(newLat, newLng, newZoom);
+      }
     });
 
-    // Click handler to show location details
-    map.current.on('click', 'risk-overlay', (e) => {
+    // Hover handler to show risk zone at cursor location
+    map.current.on('mouseenter', 'risk-overlay', (e) => {
       if (!map.current || !e.features || e.features.length === 0) return;
 
-      const feature = e.features[0];
+      // Change cursor to pointer
+      map.current.getCanvas().style.cursor = 'pointer';
+
       const coordinates = e.lngLat;
+
+      // Clear any existing risk hover popups only
+      clearHoverPopups('risk');
+
+      // Show popup only for the first feature (topmost layer)
+      const feature = e.features[0];
       const properties = feature.properties;
 
-      new mapboxgl.Popup()
+      // Check if there are infrastructure popups - if so, offset to the right
+      const hasInfrastructurePopups = hoverPopupsRef.current.infrastructure.length > 0;
+      const offset = hasInfrastructurePopups ? [270, -10] : calculatePopupOffset(0);
+
+      // Create popup for this feature
+      const popup = new mapboxgl.Popup({ offset, closeButton: false })
         .setLngLat(coordinates)
         .setHTML(
           `<div style="color: #000; padding: 12px; min-width: 200px;">
@@ -389,26 +441,22 @@ export function MapView({ layers }: MapViewProps) {
               };">${properties?.riskLevel}</span></p>
               <p><strong>Risk Score:</strong> ${properties?.riskScore}/10</p>
               <p><strong>Hazards:</strong> ${properties?.hazards}</p>
-              <p style="margin-top: 8px; font-size: 12px; color: #666;">
-                Click for detailed analysis →
-              </p>
             </div>
           </div>`
         )
-        .addTo(map.current);
-    });
+        .addTo(map.current!);
 
-    // Change cursor on hover over risk zones
-    map.current.on('mouseenter', 'risk-overlay', () => {
-      if (map.current) {
-        map.current.getCanvas().style.cursor = 'pointer';
-      }
+      // Track this hover popup by type
+      hoverPopupsRef.current.risk.push(popup);
     });
 
     map.current.on('mouseleave', 'risk-overlay', () => {
       if (map.current) {
         map.current.getCanvas().style.cursor = '';
       }
+
+      // Close risk hover popups only when mouse leaves
+      clearHoverPopups('risk');
     });
 
     // Cleanup on unmount
@@ -417,8 +465,119 @@ export function MapView({ layers }: MapViewProps) {
         map.current.remove();
         map.current = null;
       }
+      setMapLoaded(false);
     };
   }, []);
+
+  // Create markers from infrastructure data
+  useEffect(() => {
+    if (!map.current || infrastructureData.length === 0) return;
+
+    // Clear existing markers
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = [];
+
+    // Helper function to build infrastructure popup HTML
+    const buildInfrastructurePopupHTML = (point: InfrastructurePoint) => {
+      let popupHTML = `
+        <div style="color: #000; padding: 8px; min-width: 150px;">
+          <h3 style="font-weight: bold; margin-bottom: 4px;">${point.name}</h3>
+          <p style="font-size: 12px; color: #666; margin-bottom: 4px;">Type: ${point.type}</p>
+          <p style="font-size: 11px; color: #888;">Category: ${point.category}</p>
+      `;
+
+      if (point.additionalInfo) {
+        if (point.additionalInfo.operator) {
+          popupHTML += `<p style="font-size: 11px; color: #666; margin-top: 4px;"><strong>Operator:</strong> ${point.additionalInfo.operator}</p>`;
+        }
+        if (point.additionalInfo.description) {
+          popupHTML += `<p style="font-size: 11px; color: #666; margin-top: 4px; font-style: italic;">${point.additionalInfo.description}</p>`;
+        }
+        if (point.additionalInfo.address) {
+          popupHTML += `<p style="font-size: 11px; color: #666; margin-top: 4px;">📍 ${point.additionalInfo.address}</p>`;
+        }
+        if (point.additionalInfo.phone) {
+          popupHTML += `<p style="font-size: 11px; color: #666;">📞 ${point.additionalInfo.phone}</p>`;
+        }
+        if (point.additionalInfo.email) {
+          popupHTML += `<p style="font-size: 11px; color: #2563eb;"><a href="mailto:${point.additionalInfo.email}" style="color: #2563eb; text-decoration: underline;">📧 ${point.additionalInfo.email}</a></p>`;
+        }
+        if (point.additionalInfo.website) {
+          popupHTML += `<p style="font-size: 11px; color: #2563eb; margin-top: 4px;"><a href="${point.additionalInfo.website}" target="_blank" rel="noopener noreferrer" style="color: #2563eb; text-decoration: underline;">🌐 Website</a></p>`;
+        }
+        if (point.additionalInfo.beds) {
+          popupHTML += `<p style="font-size: 11px; color: #666;">🛏️ Beds: ${point.additionalInfo.beds}</p>`;
+        }
+        if (point.additionalInfo.capacity) {
+          popupHTML += `<p style="font-size: 11px; color: #666;">👥 Capacity: ${point.additionalInfo.capacity}</p>`;
+        }
+      }
+
+      popupHTML += `</div>`;
+      return popupHTML;
+    };
+
+    // Create new markers from OSM data
+    infrastructureData.forEach((point) => {
+      const el = document.createElement('div');
+      el.className = 'infrastructure-marker';
+      el.innerHTML = point.icon;
+      el.style.fontSize = '24px';
+      el.style.cursor = 'pointer';
+
+      const marker = new mapboxgl.Marker(el)
+        .setLngLat(point.coordinates);
+
+      // Handle marker hover to show popup for this specific infrastructure
+      el.addEventListener('mouseenter', (e) => {
+        e.stopPropagation();
+
+        // Clear any existing infrastructure hover popups only
+        clearHoverPopups('infrastructure');
+
+        // Show popup only for this specific marker
+        const offset = calculatePopupOffset(0);
+
+        const popup = new mapboxgl.Popup({
+          offset: offset,
+          closeButton: false
+        })
+          .setLngLat(point.coordinates)
+          .setHTML(buildInfrastructurePopupHTML(point))
+          .addTo(map.current!);
+
+        // Track this hover popup by type
+        hoverPopupsRef.current.infrastructure.push(popup);
+      });
+
+      // Handle marker mouse leave to remove infrastructure popups only
+      el.addEventListener('mouseleave', () => {
+        clearHoverPopups('infrastructure');
+      });
+
+      // Store marker reference for later control
+      markersRef.current.push(marker);
+
+      // Add to map if infrastructure layer is visible
+      if (layers.infrastructure) {
+        marker.addTo(map.current!);
+      }
+    });
+
+    console.log(`Created ${markersRef.current.length} infrastructure markers`);
+  }, [infrastructureData, map.current]);
+
+  // Update population density heatmap when data is loaded
+  useEffect(() => {
+    if (!map.current || populationData.length === 0) return;
+
+    const source = map.current.getSource('population-density') as mapboxgl.GeoJSONSource;
+    if (source) {
+      const geoJson = generatePopulationGeoJSON(populationData);
+      source.setData(geoJson);
+      console.log(`Updated population heatmap with ${populationData.length} points`);
+    }
+  }, [populationData]);
 
   // Handle layer visibility changes
   useEffect(() => {
@@ -431,6 +590,10 @@ export function MapView({ layers }: MapViewProps) {
         'visibility',
         layers.riskOverlay ? 'visible' : 'none'
       );
+      // Clear risk popups when layer is hidden
+      if (!layers.riskOverlay) {
+        clearHoverPopups('risk');
+      }
     }
     if (map.current.getLayer('risk-borders')) {
       map.current.setLayoutProperty(
@@ -448,8 +611,12 @@ export function MapView({ layers }: MapViewProps) {
         marker.remove();
       }
     });
+    // Clear infrastructure popups when layer is hidden
+    if (!layers.infrastructure) {
+      clearHoverPopups('infrastructure');
+    }
 
-    // Toggle Population Density heatmap
+    // Toggle Population Density heatmap and points
     if (map.current.getLayer('population-heatmap')) {
       map.current.setLayoutProperty(
         'population-heatmap',
@@ -457,7 +624,353 @@ export function MapView({ layers }: MapViewProps) {
         layers.populationDensity ? 'visible' : 'none'
       );
     }
+    if (map.current.getLayer('population-points')) {
+      map.current.setLayoutProperty(
+        'population-points',
+        'visibility',
+        layers.populationDensity ? 'visible' : 'none'
+      );
+      // Clear population popups when layer is hidden
+      if (!layers.populationDensity) {
+        clearHoverPopups('population');
+      }
+    }
   }, [layers]);
+
+  // Handle search location changes
+  useEffect(() => {
+    if (!map.current || !searchLocation) return;
+
+    // Use Mapbox Geocoding API to convert search query to coordinates
+    const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchLocation)}.json?access_token=${MAPBOX_API_KEY}&limit=1`;
+
+    fetch(geocodeUrl)
+      .then(response => response.json())
+      .then(data => {
+        if (data.features && data.features.length > 0) {
+          const [longitude, latitude] = data.features[0].center;
+          const placeName = data.features[0].place_name;
+
+          // Fly to the searched location
+          map.current?.flyTo({
+            center: [longitude, latitude],
+            zoom: 12,
+            essential: true,
+            duration: 2000
+          });
+
+          // Update state
+          setLng(longitude);
+          setLat(latitude);
+
+          // Add a temporary marker at the searched location
+          const searchCoords: [number, number] = [longitude, latitude];
+          const searchOffset = calculatePopupOffset(searchCoords);
+
+          const searchPopup = new mapboxgl.Popup({
+            offset: [searchOffset[0] + 25, searchOffset[1]]
+          }).setHTML(
+            `<div style="color: #000; padding: 8px;">
+              <h3 style="font-weight: bold; margin-bottom: 4px;">Search Result</h3>
+              <p style="font-size: 12px;">${placeName}</p>
+            </div>`
+          );
+
+          const searchMarker = new mapboxgl.Marker({ color: '#3b82f6' })
+            .setLngLat([longitude, latitude])
+            .setPopup(searchPopup)
+            .addTo(map.current!);
+
+          // Show popup automatically and track it with coordinates
+          searchMarker.togglePopup();
+          activePopupsRef.current.push({ popup: searchPopup, lngLat: searchCoords });
+
+          // Remove from array when popup is closed
+          searchPopup.on('close', () => {
+            activePopupsRef.current = activePopupsRef.current.filter(item => item.popup !== searchPopup);
+          });
+
+          // Remove marker after 5 seconds
+          setTimeout(() => {
+            searchMarker.remove();
+            activePopupsRef.current = activePopupsRef.current.filter(item => item.popup !== searchPopup);
+          }, 5000);
+        } else {
+          console.warn('No results found for:', searchLocation);
+        }
+      })
+      .catch(error => {
+        console.error('Geocoding error:', error);
+      });
+  }, [searchLocation]);
+
+  // Handle map click for center point and vertex selection
+  useEffect(() => {
+    if (!map.current) return;
+
+    const handleMapClick = (e: mapboxgl.MapMouseEvent) => {
+      const { lng, lat } = e.lngLat;
+
+      if (areaSelectionMode === 'centerPoint') {
+        onCenterPointSelect(lat, lng);
+      } else if (areaSelectionMode === 'fourVertices') {
+        onVertexSelect(lat, lng);
+      }
+    };
+
+    // Change cursor style when in selection mode
+    if (areaSelectionMode === 'centerPoint' || areaSelectionMode === 'fourVertices') {
+      map.current.getCanvas().style.cursor = 'crosshair';
+      map.current.on('click', handleMapClick);
+    } else {
+      map.current.getCanvas().style.cursor = '';
+    }
+
+    return () => {
+      if (map.current) {
+        map.current.off('click', handleMapClick);
+      }
+    };
+  }, [areaSelectionMode, onCenterPointSelect, onVertexSelect]);
+
+  // Draw circle when center point is selected
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    // Remove existing marker and circle if any
+    if (centerPointMarkerRef.current) {
+      centerPointMarkerRef.current.remove();
+      centerPointMarkerRef.current = null;
+    }
+
+    // Remove existing circle layer and source if any
+    if (map.current.getLayer('selection-circle-fill')) {
+      map.current.removeLayer('selection-circle-fill');
+    }
+    if (map.current.getLayer('selection-circle-border')) {
+      map.current.removeLayer('selection-circle-border');
+    }
+    if (map.current.getSource('selection-circle')) {
+      map.current.removeSource('selection-circle');
+    }
+
+    // If no center point selected, return
+    if (!selectedCenterPoint) return;
+
+    // Add marker at center point
+    centerPointMarkerRef.current = new mapboxgl.Marker({ color: '#3b82f6' })
+      .setLngLat([selectedCenterPoint.lng, selectedCenterPoint.lat])
+      .addTo(map.current);
+
+    // Create circle with 2km radius
+    // Convert 2km to degrees (approximately)
+    // At equator, 1 degree ≈ 111km, so 2km ≈ 0.018 degrees
+    // For better accuracy, we'll use a proper circle calculation
+    const radius = 2; // km
+    const points = 64;
+    const coords = [];
+
+    for (let i = 0; i < points; i++) {
+      const angle = (i / points) * 2 * Math.PI;
+      const dx = radius * Math.cos(angle);
+      const dy = radius * Math.sin(angle);
+
+      // Convert km to degrees (approximation that works reasonably well)
+      const deltaLng = dx / (111.32 * Math.cos(selectedCenterPoint.lat * Math.PI / 180));
+      const deltaLat = dy / 110.574;
+
+      coords.push([
+        selectedCenterPoint.lng + deltaLng,
+        selectedCenterPoint.lat + deltaLat
+      ]);
+    }
+
+    // Close the circle
+    coords.push(coords[0]);
+
+    // Add circle as a GeoJSON source
+    map.current.addSource('selection-circle', {
+      type: 'geojson',
+      data: {
+        type: 'Feature',
+        properties: {},
+        geometry: {
+          type: 'Polygon',
+          coordinates: [coords]
+        }
+      }
+    });
+
+    // Add circle fill layer with risk-based coloring
+    // Gray (0.4 opacity) until risk is calculated, allowing 3D terrain to show through
+    // Will be updated to: red (#ef4444) for high, orange (#f59e0b) for medium, green (#22c55e) for low
+    map.current.addLayer({
+      id: 'selection-circle-fill',
+      type: 'fill',
+      source: 'selection-circle',
+      paint: {
+        'fill-color': '#6b7280', // Gray placeholder - will be updated based on calculated risk
+        'fill-opacity': 0.4 // Semi-transparent to show 3D terrain underneath
+      }
+    });
+
+    // Add circle border layer
+    map.current.addLayer({
+      id: 'selection-circle-border',
+      type: 'line',
+      source: 'selection-circle',
+      paint: {
+        'line-color': '#ffffff',
+        'line-width': 2
+      }
+    });
+
+  }, [selectedCenterPoint, mapLoaded]);
+
+  // Draw polygon when vertices are selected
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    // Remove existing vertex markers
+    vertexMarkersRef.current.forEach(marker => marker.remove());
+    vertexMarkersRef.current = [];
+
+    // Remove existing polygon layers and source
+    if (map.current.getLayer('selection-polygon-fill')) {
+      map.current.removeLayer('selection-polygon-fill');
+    }
+    if (map.current.getLayer('selection-polygon-border')) {
+      map.current.removeLayer('selection-polygon-border');
+    }
+    if (map.current.getSource('selection-polygon')) {
+      map.current.removeSource('selection-polygon');
+    }
+
+    // If no vertices, return
+    if (selectedVertices.length === 0) return;
+
+    // Add markers for each vertex
+    selectedVertices.forEach((vertex, index) => {
+      const marker = new mapboxgl.Marker({
+        color: '#3b82f6',
+        scale: 0.8
+      })
+        .setLngLat([vertex.lng, vertex.lat])
+        .addTo(map.current!);
+
+      vertexMarkersRef.current.push(marker);
+    });
+
+    // Draw polygon if we have at least 3 vertices
+    if (selectedVertices.length >= 3) {
+      const coords = selectedVertices.map(v => [v.lng, v.lat]);
+      // Close the polygon by adding the first point at the end
+      coords.push(coords[0]);
+
+      map.current.addSource('selection-polygon', {
+        type: 'geojson',
+        data: {
+          type: 'Feature',
+          properties: {},
+          geometry: {
+            type: 'Polygon',
+            coordinates: [coords]
+          }
+        }
+      });
+
+      // Add polygon fill layer with risk-based coloring
+      // Gray (0.4 opacity) until risk is calculated, allowing 3D terrain to show through
+      // Will be updated to: red (#ef4444) for high, orange (#f59e0b) for medium, green (#22c55e) for low
+      map.current.addLayer({
+        id: 'selection-polygon-fill',
+        type: 'fill',
+        source: 'selection-polygon',
+        paint: {
+          'fill-color': '#6b7280', // Gray placeholder - will be updated based on calculated risk
+          'fill-opacity': 0.4 // Semi-transparent to show 3D terrain underneath
+        }
+      });
+
+      // Add polygon border layer
+      map.current.addLayer({
+        id: 'selection-polygon-border',
+        type: 'line',
+        source: 'selection-polygon',
+        paint: {
+          'line-color': '#ffffff',
+          'line-width': 2
+        }
+      });
+    }
+
+  }, [selectedVertices, mapLoaded]);
+
+  // Update risk overlay when risk data is calculated
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    const source = map.current.getSource('risk-zones') as mapboxgl.GeoJSONSource;
+    if (!source) return;
+
+    // If no risk data, clear the overlay
+    if (!riskData) {
+      source.setData({
+        type: 'FeatureCollection',
+        features: [],
+      });
+      return;
+    }
+
+    // Create geometry based on selected area
+    let geometry: any = null;
+
+    if (selectedVertices.length === 4) {
+      // Use the 4-vertex polygon
+      const coordinates = selectedVertices.map(v => [v.lng, v.lat]);
+      coordinates.push([selectedVertices[0].lng, selectedVertices[0].lat]); // Close the polygon
+      geometry = {
+        type: 'Polygon',
+        coordinates: [coordinates],
+      };
+    } else if (selectedCenterPoint) {
+      // Use a circle around the center point (approximate with polygon)
+      const radiusInDegrees = 0.05; // ~5km radius
+      const points = 64;
+      const coordinates = [];
+      for (let i = 0; i < points; i++) {
+        const angle = (i / points) * 2 * Math.PI;
+        const lat = selectedCenterPoint.lat + radiusInDegrees * Math.cos(angle);
+        const lng = selectedCenterPoint.lng + radiusInDegrees * Math.sin(angle);
+        coordinates.push([lng, lat]);
+      }
+      coordinates.push(coordinates[0]); // Close the polygon
+      geometry = {
+        type: 'Polygon',
+        coordinates: [coordinates],
+      };
+    }
+
+    // If we have geometry, create the risk overlay feature
+    if (geometry) {
+      source.setData({
+        type: 'FeatureCollection',
+        features: [
+          {
+            type: 'Feature',
+            properties: {
+              riskScore: riskData.R_score, // 0-1 normalized score
+              riskLevel: riskData.risk_level,
+              H_score: riskData.H_score,
+              L_score: riskData.L_score,
+              V_score: riskData.V_score,
+            },
+            geometry: geometry,
+          },
+        ],
+      });
+    }
+  }, [riskData, selectedCenterPoint, selectedVertices, mapLoaded]);
 
   // Helper function to format coordinates
   const formatCoordinates = (lat: number, lng: number) => {
@@ -490,144 +1003,82 @@ export function MapView({ layers }: MapViewProps) {
         Elevation: {currentElevation}m
       </div>
 
-      {/* Overall Risk Score Overlay - Top Right */}
-      <div
-        className="absolute text-white p-6 rounded-lg"
-        style={{
-          position: 'fixed',
-          top: '100px',
-          right: '20px',
-          zIndex: 9999,
-          backgroundColor: 'transparent',
-          minWidth: '200px'
-        }}
-      >
-        <h3 className="font-semibold text-center mb-4" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.8), -1px -1px 2px rgba(0,0,0,0.8)' }}>
-          Overall Risk Score
-        </h3>
-
-        {/* Circular Progress Indicator with centered number */}
-        <div className="flex justify-center mb-4">
-          <div
-            className="relative w-24 h-24 cursor-pointer hover:opacity-80 transition-opacity"
-            onClick={() => setShowFormulaDialog(true)}
-            title="Click to see calculation formula"
-          >
-            <svg
-              className="w-24 h-24 transform -rotate-90"
-              viewBox="0 0 100 100"
-            >
-              {/* Background circle */}
-              <circle
-                cx="50"
-                cy="50"
-                r="40"
-                stroke="#374151"
-                strokeWidth="8"
-                fill="none"
-              />
-              {/* Progress circle */}
-              <circle
-                cx="50"
-                cy="50"
-                r="40"
-                stroke="#EF4444"
-                strokeWidth="8"
-                fill="none"
-                strokeDasharray={`${68 * 2.51} 251`}
-                strokeLinecap="round"
-              />
-            </svg>
-            {/* Centered number */}
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-white font-bold text-lg" style={{ textShadow: '2px 2px 4px rgba(0,0,0,0.9), -1px -1px 2px rgba(0,0,0,0.9)' }}>0.68</span>
-            </div>
-          </div>
+      {/* Infrastructure Loading Indicator */}
+      {isLoadingInfrastructure && (
+        <div className="absolute top-32 left-4 bg-blue-600/90 text-white px-3 py-2 rounded text-xs backdrop-blur-sm z-10 flex items-center gap-2">
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+          Loading infrastructure data...
         </div>
+      )}
 
-        {/* Three Circle Diagram (Borromean Rings) - Touching Triangle Layout */}
-        <div className="flex justify-center">
-          <div
-            className="relative cursor-pointer hover:opacity-80 transition-opacity"
-            style={{ width: '96px', height: '88px' }}
-            onClick={() => setShowFormulaDialog(true)}
-            title="Click to see calculation formula"
-          >
-            {/* Blue circle - top left, H label at top-left corner */}
-            <div className="absolute" style={{ top: '0px', left: '0px' }}>
-              <div className="relative w-12 h-12 border-4 border-blue-500 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.9)' }}>0.72</span>
-                {/* H label at top-left corner */}
-                <div className="absolute -top-2 -left-2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">H</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Green circle - top right, L label at top-right corner */}
-            <div className="absolute" style={{ top: '0px', right: '0px' }}>
-              <div className="relative w-12 h-12 border-4 border-green-500 rounded-full bg-green-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.9)' }}>0.65</span>
-                {/* L label at top-right corner */}
-                <div className="absolute -top-2 -right-2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">L</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Orange circle - bottom center, V label at bottom corner */}
-            <div className="absolute" style={{ bottom: '0px', left: '50%', transform: 'translateX(-50%)' }}>
-              <div className="relative w-12 h-12 border-4 border-orange-500 rounded-full bg-orange-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold" style={{ textShadow: '1px 1px 3px rgba(0,0,0,0.9)' }}>0.67</span>
-                {/* V label at bottom corner */}
-                <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">V</span>
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Infrastructure Count Display */}
+      {!isLoadingInfrastructure && infrastructureData.length > 0 && (
+        <div className="absolute top-32 left-4 bg-green-600/90 text-white px-3 py-2 rounded text-xs backdrop-blur-sm z-10">
+          {infrastructureData.length} infrastructure points loaded
         </div>
-      </div>
+      )}
 
-      {/* Dynamic Legend - shows based on active layers */}
-      {(layers.riskOverlay || layers.populationDensity) && (
+      {/* Population Loading Indicator */}
+      {isLoadingPopulation && (
+        <div className="absolute top-44 left-4 bg-purple-600/90 text-white px-3 py-2 rounded text-xs backdrop-blur-sm z-10 flex items-center gap-2">
+          <div className="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+          Loading population data...
+        </div>
+      )}
+
+      {/* Population Count Display */}
+      {!isLoadingPopulation && populationData.length > 0 && (
+        <div className="absolute top-44 left-4 bg-purple-600/90 text-white px-3 py-2 rounded text-xs backdrop-blur-sm z-10">
+          {populationData.length} population points loaded
+        </div>
+      )}
+
+      {/* Risk Overlay Legend */}
+      {layers.riskOverlay && riskData && (
+        <div className="absolute top-20 right-4 bg-black/70 text-white p-3 rounded text-xs backdrop-blur-sm z-10 space-y-2">
+          <div className="font-semibold mb-2">Risk Level</div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded bg-red-500"></div>
+            <span>High (0.66 - 1.0)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded bg-yellow-500"></div>
+            <span>Medium (0.33 - 0.66)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded bg-green-500"></div>
+            <span>Low (0 - 0.33)</span>
+          </div>
+          {riskData && (
+            <div className="mt-3 pt-2 border-t border-white/20">
+              <div className="font-semibold mb-1">Current Area</div>
+              <div className="text-white">
+                Risk Score: {(riskData.R_score * 100).toFixed(1)}%
+              </div>
+              <div className="text-white capitalize">
+                Level: {riskData.risk_level.replace('-', ' ')}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Population Density Legend */}
+      {layers.populationDensity && (
         <div className="absolute top-80 right-4 bg-black/70 text-white p-3 rounded text-xs backdrop-blur-sm z-10 space-y-2">
-          {layers.riskOverlay && (
-            <>
-              <div className="font-semibold mb-2">Risk Levels</div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-red-500 rounded"></div>
-                <span>High Risk</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-orange-500 rounded"></div>
-                <span>Medium Risk</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 bg-green-500 rounded"></div>
-                <span>Low Risk</span>
-              </div>
-            </>
-          )}
-
-          {layers.populationDensity && (
-            <>
-              {layers.riskOverlay && <div className="border-t border-gray-500 my-2"></div>}
-              <div className="font-semibold mb-2">Population Density</div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded" style={{ background: 'rgb(178,24,43)' }}></div>
-                <span>High (&gt;400/km²)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded" style={{ background: 'rgb(239,138,98)' }}></div>
-                <span>Medium (200-400/km²)</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="w-4 h-4 rounded" style={{ background: 'rgb(103,169,207)' }}></div>
-                <span>Low (&lt;200/km²)</span>
-              </div>
-            </>
-          )}
+          <div className="font-semibold mb-2">Population Density</div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: 'rgb(178,24,43)' }}></div>
+            <span>High (&gt;400/km²)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: 'rgb(239,138,98)' }}></div>
+            <span>Medium (200-400/km²)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: 'rgb(103,169,207)' }}></div>
+            <span>Low (&lt;200/km²)</span>
+          </div>
         </div>
       )}
 
@@ -646,88 +1097,6 @@ export function MapView({ layers }: MapViewProps) {
           </ol>
         </div>
       )}
-
-      {/* Mathematical Formula Dialog */}
-      <Dialog open={showFormulaDialog} onOpenChange={setShowFormulaDialog}>
-        <DialogContent className="bg-slate-800 text-white border-slate-700 max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-semibold text-white">
-              Risk Calculation Methodology
-            </DialogTitle>
-            <DialogDescription className="text-gray-400">
-              Mathematical formulas and methodology used to calculate risk scores
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6 text-sm">
-            {/* Overall Risk Formula */}
-            <div className="bg-slate-900 p-4 rounded-lg">
-              <h3 className="font-semibold text-lg mb-3 text-white">Overall Risk Score Formula</h3>
-              <div className="bg-black p-3 rounded font-mono text-green-400 mb-3">
-                Risk = √(H² + L² + V²) / √3
-              </div>
-              <p className="text-gray-300 mb-2">
-                Where H, L, and V are normalized scores between 0 and 1, representing:
-              </p>
-              <ul className="list-disc pl-6 text-gray-300 space-y-1">
-                <li><strong className="text-blue-400">H (Event Drivers)</strong> = 0.72</li>
-                <li><strong className="text-green-400">L (Local Lore & History)</strong> = 0.65</li>
-                <li><strong className="text-orange-400">V (Vulnerability)</strong> = 0.67</li>
-              </ul>
-            </div>
-
-            {/* Calculation Steps */}
-            <div className="bg-slate-900 p-4 rounded-lg">
-              <h3 className="font-semibold text-lg mb-3 text-white">Current Calculation</h3>
-              <div className="space-y-2 font-mono text-sm">
-                <div className="text-gray-300">Step 1: Square each component</div>
-                <div className="text-gray-400 pl-4">
-                  H² = 0.72² = 0.518<br/>
-                  L² = 0.65² = 0.423<br/>
-                  V² = 0.67² = 0.449
-                </div>
-
-                <div className="text-gray-300 mt-3">Step 2: Sum the squares</div>
-                <div className="text-gray-400 pl-4">
-                  H² + L² + V² = 0.518 + 0.423 + 0.449 = 1.390
-                </div>
-
-                <div className="text-gray-300 mt-3">Step 3: Take square root and normalize</div>
-                <div className="text-gray-400 pl-4">
-                  √(1.390) / √3 = 1.179 / 1.732 = <strong className="text-red-400">0.68</strong>
-                </div>
-              </div>
-            </div>
-
-            {/* Component Explanations */}
-            <div className="bg-slate-900 p-4 rounded-lg">
-              <h3 className="font-semibold text-lg mb-3 text-white">Component Calculation Methods</h3>
-              <div className="space-y-3 text-gray-300">
-                <div>
-                  <strong className="text-blue-400">Event Drivers (H):</strong> Combines topographical data, rainfall intensity, seismic activity, and regional hazard patterns using weighted averaging and normalization.
-                </div>
-                <div>
-                  <strong className="text-green-400">Local Lore & History (L):</strong> Integrates historical records, oral histories, and community knowledge using temporal weighting and confidence scoring.
-                </div>
-                <div>
-                  <strong className="text-orange-400">Vulnerability (V):</strong> Assesses population density, infrastructure fragility, and economic exposure using multi-criteria analysis and asset valuation.
-                </div>
-              </div>
-            </div>
-
-            {/* Methodology Notes */}
-            <div className="bg-blue-900/20 border border-blue-700 p-4 rounded-lg">
-              <h4 className="font-semibold text-blue-300 mb-2">Methodology Notes</h4>
-              <ul className="list-disc pl-6 text-gray-300 space-y-1 text-xs">
-                <li>The Euclidean distance formula ensures balanced consideration of all three components</li>
-                <li>Normalization by √3 keeps the final score within [0,1] range</li>
-                <li>This approach prevents any single component from dominating the overall risk assessment</li>
-                <li>All input data is validated and quality-checked before inclusion in calculations</li>
-              </ul>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

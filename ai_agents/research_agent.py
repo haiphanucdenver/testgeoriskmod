@@ -290,11 +290,11 @@ if __name__ == "__main__":
         hazard_type=HazardType.DEBRIS_FLOW,
         time_range_years=200,
         include_indigenous_knowledge=True,
-        max_sources=15
+        max_sources=10
     )
     
     try:
-        print("Starting deep research...\n")
+        print("AI agent - Starting deep research...\n")
         result = agent.conduct_research_sync(query)
         
         print(f"\n{'='*80}")

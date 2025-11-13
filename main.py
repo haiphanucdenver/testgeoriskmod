@@ -5,7 +5,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pathlib import Path
 import sys
- 
+
 # load .env from file next to this script (safer than relying on CWD)
 env_path = Path(__file__).parent / ".env"
 if not env_path.exists():

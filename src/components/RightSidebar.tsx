@@ -9,38 +9,49 @@ import {
 
 export function RightSidebar() {
   const [showFormulaDialog, setShowFormulaDialog] = useState(false);
-  return (
-    <div className="w-64 bg-slate-900 text-white p-4 flex flex-col h-full">
-      {/* Risk Assessment Header */}
-      <div className="bg-slate-800 px-4 py-2 rounded">
-        <h2 className="font-semibold">
-          Borromean Risk Assessment
-        </h2>
-      </div>
 
-      {/* Overall Risk Score - Centered */}
-      <div className="flex-1 flex flex-col justify-center space-y-4">
+  // Risk scores for each component
+  const hScore = 0.72;
+  const lScore = 0.65;
+  const vScore = 0.67;
+
+  // Determine which score is highest
+  const maxScore = Math.max(hScore, lScore, vScore);
+  const hBorderWidth = hScore === maxScore ? '8px' : '4px';
+  const lBorderWidth = lScore === maxScore ? '8px' : '4px';
+  const vBorderWidth = vScore === maxScore ? '8px' : '4px';
+
+  return (
+    <div className="w-64 bg-slate-900 text-white p-4 overflow-y-auto h-full">
+      {/* Borromean Risk Assessment Header */}
+      <h2 className="text-lg font-semibold bg-slate-800 px-4 py-2 rounded mb-6 text-center">
+        Borromean Risk Assessment
+      </h2>
+
+      {/* Risk Assessment Section */}
+      <div className="space-y-4">
+        {/* Overall Risk Score */}
         <h3 className="font-semibold text-gray-200 text-center">
           Overall Risk Score
         </h3>
 
         {/* Circular Progress Indicator with centered number */}
         <div className="flex justify-center">
-          <div 
-            className="relative w-24 h-24 cursor-pointer hover:opacity-80 transition-opacity"
+          <div
+            className="relative w-28 h-28 cursor-pointer hover:opacity-80 transition-opacity"
             onClick={() => setShowFormulaDialog(true)}
             title="Click to see calculation formula"
           >
             <svg
-              className="w-24 h-24 transform -rotate-90"
+              className="w-28 h-28 transform -rotate-90"
               viewBox="0 0 100 100"
             >
-              {/* Background circle */}
+              {/* Background circle - light grey for unfilled portion */}
               <circle
                 cx="50"
                 cy="50"
                 r="40"
-                stroke="#374151"
+                stroke="#D1D5DB"
                 strokeWidth="8"
                 fill="none"
               />
@@ -58,58 +69,57 @@ export function RightSidebar() {
             </svg>
             {/* Centered number */}
             <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-white font-bold text-lg">0.68</span>
+              <span className="text-white font-bold text-xl">0.68</span>
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Three Circle Diagram with individual numbers and labels */}
-        <div className="flex justify-center">
-          <div 
-            className="relative w-28 h-26 cursor-pointer hover:opacity-80 transition-opacity"
+      {/* Three Circle Diagram (Borromean Rings) - Overlapping Pattern */}
+      <div className="flex justify-center" style={{ marginTop: '40px' }}>
+          <div
+            className="relative cursor-pointer hover:opacity-80 transition-opacity"
+            style={{ width: '160px', height: '150px' }}
             onClick={() => setShowFormulaDialog(true)}
             title="Click to see calculation formula"
           >
-            {/* Blue circle - top left, H label at top-left corner */}
-            <div className="absolute top-0 left-2">
-              <div className="relative w-12 h-12 border-4 border-blue-500 rounded-full bg-blue-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold">0.72</span>
-                {/* H label at top-left corner */}
-                <div className="absolute -top-2 -left-2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">H</span>
-                </div>
+            {/* Blue circle (H) - top position */}
+            <div className="absolute" style={{ top: '0px', left: '48px' }}>
+              <div className="relative w-16 h-16 rounded-full flex items-center justify-center" style={{ borderWidth: hBorderWidth, borderColor: '#263ef7', backgroundColor: 'rgba(38, 62, 247, 0.1)' }}>
+                <span className="text-white text-sm font-bold">{hScore}</span>
+              </div>
+              {/* H label outside circle - above with visible gap */}
+              <div className="absolute" style={{ top: '-28px', left: '50%', transform: 'translateX(-50%)' }}>
+                <span className="text-white text-base font-bold">H</span>
               </div>
             </div>
-            
-            {/* Green circle - top right, L label at top-right corner */}
-            <div className="absolute top-0 right-2">
-              <div className="relative w-12 h-12 border-4 border-green-500 rounded-full bg-green-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold">0.65</span>
-                {/* L label at top-right corner */}
-                <div className="absolute -top-2 -right-2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">L</span>
-                </div>
+
+            {/* Teal circle (L) - bottom right, overlapping */}
+            <div className="absolute" style={{ top: '40px', left: '72px' }}>
+              <div className="relative w-16 h-16 rounded-full flex items-center justify-center" style={{ borderWidth: lBorderWidth, borderColor: '#30a6ec', backgroundColor: 'rgba(48, 166, 236, 0.1)' }}>
+                <span className="text-white text-sm font-bold">{lScore}</span>
+              </div>
+              {/* L label outside circle - right with minimal gap */}
+              <div className="absolute" style={{ top: '50%', right: '-16px', transform: 'translateY(-50%)' }}>
+                <span className="text-white text-base font-bold">L</span>
               </div>
             </div>
-            
-            {/* Orange circle - bottom center, V label at bottom corner */}
-            <div className="absolute bottom-4 left-1/2 transform -translate-x-1/2">
-              <div className="relative w-12 h-12 border-4 border-orange-500 rounded-full bg-orange-500/10 flex items-center justify-center">
-                <span className="text-white text-xs font-semibold">0.67</span>
-                {/* V label at bottom corner */}
-                <div className="absolute -bottom-2 left-1/2 transform -translate-x-1/2">
-                  <span className="text-white text-xs font-semibold bg-slate-900 px-1 rounded">V</span>
-                </div>
+
+            {/* Purple circle (V) - bottom left, overlapping both */}
+            <div className="absolute" style={{ top: '40px', left: '24px' }}>
+              <div className="relative w-16 h-16 rounded-full flex items-center justify-center" style={{ borderWidth: vBorderWidth, borderColor: '#9c2fee', backgroundColor: 'rgba(156, 47, 238, 0.1)' }}>
+                <span className="text-white text-sm font-bold">{vScore}</span>
+              </div>
+              {/* V label outside circle - left with minimal gap */}
+              <div className="absolute" style={{ top: '50%', left: '-18px', transform: 'translateY(-50%)' }}>
+                <span className="text-white text-base font-bold">V</span>
               </div>
             </div>
           </div>
         </div>
 
-        <div className="text-center text-gray-300"></div>
-      </div>
-
       {/* Assessment Components Section */}
-      <div className="space-y-4 border-t border-gray-700 pt-4">
+      <div className="space-y-4 border-t border-gray-700 pt-4 mt-6">
         <h3 className="font-semibold text-gray-200">
           Assessment Components
         </h3>
@@ -119,15 +129,34 @@ export function RightSidebar() {
             <div className="font-semibold text-gray-200 mb-1">Event Drivers (H)</div>
             <p>A normalized score [0,1] representing the likelihood of a hazardous event based on physical conditions.</p>
           </div>
-          
+
           <div>
             <div className="font-semibold text-gray-200 mb-1">Local Lore & History (L)</div>
             <p>A normalized score [0,1] representing the strength of place-based historical and anecdotal evidence for past events.</p>
           </div>
-          
+
           <div>
             <div className="font-semibold text-gray-200 mb-1">Vulnerability (V)</div>
             <p>A normalized score [0,1] representing the potential consequences based on the exposure, fragility, and criticality of assets.</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Risk Color Legend */}
+      <div className="space-y-3 border-t border-gray-700 pt-4 mt-6">
+        <h3 className="font-semibold text-gray-200">Risk Levels</h3>
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: '#ef4444' }}></div>
+            <span className="text-xs text-gray-300">High Risk</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: '#f59e0b' }}></div>
+            <span className="text-xs text-gray-300">Medium Risk</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ background: '#22c55e' }}></div>
+            <span className="text-xs text-gray-300">Low Risk</span>
           </div>
         </div>
       </div>
@@ -143,7 +172,7 @@ export function RightSidebar() {
               Mathematical formulas and methodology used to calculate risk scores
             </DialogDescription>
           </DialogHeader>
-          
+
           <div className="space-y-6 text-sm">
             {/* Overall Risk Formula */}
             <div className="bg-slate-900 p-4 rounded-lg">
@@ -155,9 +184,9 @@ export function RightSidebar() {
                 Where H, L, and V are normalized scores between 0 and 1, representing:
               </p>
               <ul className="list-disc pl-6 text-gray-300 space-y-1">
-                <li><strong className="text-blue-400">H (Event Drivers)</strong> = 0.72</li>
-                <li><strong className="text-green-400">L (Local Lore & History)</strong> = 0.65</li>
-                <li><strong className="text-orange-400">V (Vulnerability)</strong> = 0.67</li>
+                <li><strong className="text-blue-400">H (Event Drivers)</strong> = {hScore}</li>
+                <li><strong className="text-amber-700">L (Local Lore & History)</strong> = {lScore}</li>
+                <li><strong className="text-purple-400">V (Vulnerability)</strong> = {vScore}</li>
               </ul>
             </div>
 
@@ -171,12 +200,12 @@ export function RightSidebar() {
                   L² = 0.65² = 0.423<br/>
                   V² = 0.67² = 0.449
                 </div>
-                
+
                 <div className="text-gray-300 mt-3">Step 2: Sum the squares</div>
                 <div className="text-gray-400 pl-4">
                   H² + L² + V² = 0.518 + 0.423 + 0.449 = 1.390
                 </div>
-                
+
                 <div className="text-gray-300 mt-3">Step 3: Take square root and normalize</div>
                 <div className="text-gray-400 pl-4">
                   √(1.390) / √3 = 1.179 / 1.732 = <strong className="text-red-400">0.68</strong>
@@ -192,10 +221,10 @@ export function RightSidebar() {
                   <strong className="text-blue-400">Event Drivers (H):</strong> Combines topographical data, rainfall intensity, seismic activity, and regional hazard patterns using weighted averaging and normalization.
                 </div>
                 <div>
-                  <strong className="text-green-400">Local Lore & History (L):</strong> Integrates historical records, oral histories, and community knowledge using temporal weighting and confidence scoring.
+                  <strong className="text-amber-700">Local Lore & History (L):</strong> Integrates historical records, oral histories, and community knowledge using temporal weighting and confidence scoring.
                 </div>
                 <div>
-                  <strong className="text-orange-400">Vulnerability (V):</strong> Assesses population density, infrastructure fragility, and economic exposure using multi-criteria analysis and asset valuation.
+                  <strong className="text-purple-400">Vulnerability (V):</strong> Assesses population density, infrastructure fragility, and economic exposure using multi-criteria analysis and asset valuation.
                 </div>
               </div>
             </div>
