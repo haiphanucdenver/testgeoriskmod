@@ -1060,16 +1060,21 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         title: storyForm.title,
         story_text: storyForm.story_text,
         location_description: storyForm.location_description,
+        latitude: mapLocation.lat,
+        longitude: mapLocation.lng,
         created_by: 'Current User'
       });
 
       toast.dismiss(loadingToast);
 
       if (response.ai_status === 'completed') {
-        toast.success(`Story analyzed successfully! AI extracted: ${response.ai_results?.ai_event_type || 'information'}`);
+        toast.success(`Story analyzed successfully! L-Score: ${response.l_score?.toFixed(3)} | Lore ID: ${response.lore_id}`);
       } else {
-        toast.error(`Story submitted but AI analysis failed: ${response.error}`);
+        toast.error(`Story submitted but AI analysis failed`);
       }
+
+      // Mark L Factor as saved
+      setLDataSaved(true);
 
       // Clear form and reload stories
       setStoryForm({ title: '', story_text: '', location_description: '' });
@@ -1100,11 +1105,14 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
       toast.dismiss(loadingToast);
 
-      if (response.story_ids.length > 0) {
-        toast.success(`AI discovered ${response.story_ids.length} lore stories at this location!`);
+      if (response.lore_ids && response.lore_ids.length > 0) {
+        toast.success(`AI discovered ${response.lore_ids.length} lore stories! Location ID: ${response.location_id}`);
       } else {
         toast.info('No lore found at this location. Try expanding the search radius.');
       }
+
+      // Mark L Factor as saved
+      setLDataSaved(true);
 
       // Reload stories
       await loadLoreStories();
@@ -1147,6 +1155,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       } else {
         toast.error(`Observation submitted but AI analysis failed: ${response.error}`);
       }
+
+      // Mark L Factor as saved
+      setLDataSaved(true);
 
       // Clear form and reload stories
       setObservationForm({
