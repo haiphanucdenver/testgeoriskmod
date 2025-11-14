@@ -247,28 +247,22 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const [storyForm, setStoryForm] = useState({
     title: '',
     story_text: '',
-    location_description: '',
-    recency_years: '',
-    credibility: '',
-    spatial_relevance_m: ''
+    location_description: ''
+    // AI extracts: recency, credibility, spatial relevance automatically
   });
   const [discoverForm, setDiscoverForm] = useState({
     latitude: mapLocation.lat,
     longitude: mapLocation.lng,
-    location_radius_m: 10000,
-    recency_years: '',
-    credibility: '',
-    spatial_relevance_m: ''
+    location_radius_m: 10000
+    // AI discovers lore and extracts all metadata automatically
   });
   const [observationForm, setObservationForm] = useState({
     title: '',
     latitude: mapLocation.lat,
     longitude: mapLocation.lng,
     observation_sight: '',
-    observation_sound: '',
-    recency_years: '',
-    credibility: '',
-    spatial_relevance_m: ''
+    observation_sound: ''
+    // AI analyzes observation and provides interpretation
   });
 
   // Event Drivers (H) data items
@@ -2467,7 +2461,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                           </div>
 
                           <div>
-                            <Label htmlFor="story-location" className="text-gray-900 mb-2 block">Location</Label>
+                            <Label htmlFor="story-location" className="text-gray-900 mb-2 block">Location Context (Optional)</Label>
                             <Input
                               id="story-location"
                               placeholder="e.g., Near Eagle Creek, Mt. Hood area"
@@ -2475,50 +2469,22 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                               onChange={(e) => setStoryForm({...storyForm, location_description: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
                             />
+                            <p className="text-xs text-gray-700 mt-1">Additional location context to help AI extract spatial information</p>
                           </div>
 
-                          <div>
-                            <Label htmlFor="story-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
-                            <Input
-                              id="story-recency"
-                              type="number"
-                              placeholder="e.g., 50"
-                              value={storyForm.recency_years}
-                              onChange={(e) => setStoryForm({...storyForm, recency_years: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
-                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="story-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
-                            <Select
-                              value={storyForm.credibility}
-                              onValueChange={(value) => setStoryForm({...storyForm, credibility: value})}
-                            >
-                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
-                                <SelectValue placeholder="Select source type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
-                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
-                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="story-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
-                            <Input
-                              id="story-spatial"
-                              type="number"
-                              placeholder="e.g., 100"
-                              value={storyForm.spatial_relevance_m}
-                              onChange={(e) => setStoryForm({...storyForm, spatial_relevance_m: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
-                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                            <div className="flex items-start gap-2">
+                              <Sparkles className="h-5 w-5 text-blue-600 mt-0.5" />
+                              <div>
+                                <h5 className="font-semibold text-blue-900 mb-1">AI Will Extract Automatically:</h5>
+                                <ul className="text-sm text-blue-800 space-y-1">
+                                  <li>• <strong>Recency</strong> - When the event occurred (years ago)</li>
+                                  <li>• <strong>Credibility</strong> - Source reliability (oral tradition, historical, scientific)</li>
+                                  <li>• <strong>Spatial Information</strong> - Location details and precision</li>
+                                  <li>• <strong>Event Type</strong> - Type of mass movement (landslide, debris flow, etc.)</li>
+                                </ul>
+                              </div>
+                            </div>
                           </div>
 
                           <div className="flex gap-4">
@@ -2582,51 +2548,23 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                               onChange={(e) => setDiscoverForm({...discoverForm, location_radius_m: parseInt(e.target.value)})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
                             />
-                            <p className="text-xs text-gray-700 mt-1">Default: 10,000 meters (10 km)</p>
+                            <p className="text-xs text-gray-700 mt-1">How far to search for historical lore (default: 10 km)</p>
                           </div>
 
-                          <div>
-                            <Label htmlFor="discover-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
-                            <Input
-                              id="discover-recency"
-                              type="number"
-                              placeholder="e.g., 50"
-                              value={discoverForm.recency_years}
-                              onChange={(e) => setDiscoverForm({...discoverForm, recency_years: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
-                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="discover-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
-                            <Select
-                              value={discoverForm.credibility}
-                              onValueChange={(value) => setDiscoverForm({...discoverForm, credibility: value})}
-                            >
-                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
-                                <SelectValue placeholder="Select source type" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
-                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
-                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
-                          </div>
-
-                          <div>
-                            <Label htmlFor="discover-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
-                            <Input
-                              id="discover-spatial"
-                              type="number"
-                              placeholder="e.g., 100"
-                              value={discoverForm.spatial_relevance_m}
-                              onChange={(e) => setDiscoverForm({...discoverForm, spatial_relevance_m: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
-                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
+                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                            <div className="flex items-start gap-2">
+                              <Sparkles className="h-5 w-5 text-green-600 mt-0.5" />
+                              <div>
+                                <h5 className="font-semibold text-green-900 mb-1">AI Research Agent Will:</h5>
+                                <ul className="text-sm text-green-800 space-y-1">
+                                  <li>• Search historical databases for past events</li>
+                                  <li>• Review news archives and reports</li>
+                                  <li>• Check indigenous knowledge repositories</li>
+                                  <li>• Extract recency, credibility, and spatial data automatically</li>
+                                  <li>• Save all discovered lore to the database</li>
+                                </ul>
+                              </div>
+                            </div>
                           </div>
 
                           <div className="flex flex-col gap-4">
