@@ -1,3 +1,4 @@
+// AI-Driven Lore Collection with extraction_agent and research_agent
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
