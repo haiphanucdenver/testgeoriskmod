@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import os
@@ -10,15 +11,34 @@ from datetime import datetime
 import hashlib
 from pathlib import Path
 import numpy as np
+import json
+
+# AI Agents imports
+from ai_agents.models import (
+    ExtractionRequest,
+    ResearchQuery,
+    LocalLoreExtraction,
+    ResearchResult,
+    HazardType as AIHazardType
+)
+from ai_agents.extraction_agent import DocumentExtractionAgent
+from ai_agents.research_agent import DeepResearchAgent
+from ai_agents.file_processor import FileProcessor
+from ai_agents.config import Config as AIConfig
 
 load_dotenv()
 
-app = FastAPI(title="GEORISKMOD API", version="1.0.0")
+app = FastAPI(
+    title="GEORISKMOD API - Unified Server",
+    description="Unified API for GEORISKMOD including AI-powered Local Lore extraction and risk assessment",
+    version="2.0.0"
+)
 
 # Enable CORS for frontend connection
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:3000",  # React dev server
         "http://localhost:5173",  # Vite default
         "http://localhost:5174",  # Vite alternative
         "http://localhost:3005",  # Vite alternative port
@@ -32,6 +52,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize AI agents
+extraction_agent = DocumentExtractionAgent()
+research_agent = DeepResearchAgent()
+file_processor = FileProcessor()
+
+# Create AI upload directory
+os.makedirs(AIConfig.UPLOAD_DIR, exist_ok=True)
 
 # Database connection function
 def get_conn():
@@ -133,10 +161,15 @@ class VFactorSubmit(BaseModel):
 @app.get("/")
 def read_root():
     return {
-        "message": "GEORISKMOD API is running",
-        "version": "1.0.0",
+        "message": "GEORISKMOD API - Unified Server with AI Agents",
+        "version": "2.0.0",
+        "services": {
+            "core": "GEORISKMOD Risk Assessment",
+            "ai": "Local Lore AI Agents (Extraction & Research)"
+        },
         "endpoints": {
             "health": "/api/health",
+            "ai_health": "/ai/health",
             "locations": "/api/locations",
             "events": "/api/events",
             "risks": "/api/risks",
@@ -146,6 +179,10 @@ def read_root():
             "data_sources": "/api/data-sources",
             "file_upload": "/api/upload",
             "statistics": "/api/statistics",
+            "ai_extract_text": "/ai/extract/text",
+            "ai_extract_file": "/ai/extract/file",
+            "ai_research": "/ai/research",
+            "ai_config": "/ai/config",
             "docs": "/docs"
         }
     }
@@ -167,6 +204,208 @@ def health_check():
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+# ===== AI AGENTS ENDPOINTS =====
+
+@app.get("/ai/health")
+async def ai_health_check():
+    """AI agents health check"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "openai_configured": bool(AIConfig.OPENAI_API_KEY),
+        "models": {
+            "extraction": AIConfig.OPENAI_MODEL,
+            "research": AIConfig.OPENAI_RESEARCH_MODEL
+        },
+        "agents": {
+            "extraction": "DocumentExtractionAgent",
+            "research": "DeepResearchAgent",
+            "file_processor": "FileProcessor"
+        }
+    }
+
+@app.post("/ai/extract/text", response_model=List[LocalLoreExtraction])
+async def ai_extract_from_text(request: ExtractionRequest):
+    """
+    Extract Local Lore data from raw text using AI.
+
+    **Request Body:**
+    - `text`: Text content to analyze
+    - `location_context`: Optional location context
+    - `current_date`: Optional current date for calculations
+
+    **Returns:** List of extracted LocalLoreExtraction objects with calculated scores
+    """
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="No text provided")
+
+        results = await extraction_agent.extract_from_text(request)
+        return results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+
+@app.post("/ai/extract/file", response_model=List[LocalLoreExtraction])
+async def ai_extract_from_file(
+    file: UploadFile = File(...),
+    location_context: Optional[str] = Form(None)
+):
+    """
+    Extract Local Lore data from an uploaded document using AI.
+
+    **Supported formats:** PDF, DOCX, TXT, MD
+
+    **Form Data:**
+    - `file`: Document file to process
+    - `location_context`: Optional location context
+
+    **Returns:** List of extracted LocalLoreExtraction objects with calculated scores
+    """
+    try:
+        # Save uploaded file
+        file_content = await file.read()
+        file_path = os.path.join(AIConfig.UPLOAD_DIR, file.filename)
+
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+
+        # Get file info
+        file_info = file_processor.get_file_info(file_path)
+
+        if not file_info["is_supported"]:
+            os.remove(file_path)  # Clean up
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_info['extension']}. "
+                       f"Supported: {', '.join(FileProcessor.SUPPORTED_EXTENSIONS)}"
+            )
+
+        # Check file size
+        if file_info["size_bytes"] > AIConfig.MAX_FILE_SIZE:
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Max size: {AIConfig.MAX_FILE_SIZE / (1024*1024)}MB"
+            )
+
+        # Extract text
+        text = file_processor.extract_text(file_path)
+
+        # Create extraction request
+        request = ExtractionRequest(
+            text=text,
+            location_context=location_context,
+            current_date=datetime.now()
+        )
+
+        # Extract lore data
+        results = await extraction_agent.extract_from_text(request)
+
+        # Clean up file (optional - you might want to keep for audit)
+        # os.remove(file_path)
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI file processing failed: {str(e)}")
+
+@app.post("/ai/research", response_model=ResearchResult)
+async def ai_conduct_research(query: ResearchQuery):
+    """
+    Conduct deep AI research about a location's mass movement history.
+
+    **Request Body:**
+    - `location`: Location to research (required)
+    - `hazard_type`: Specific hazard type to focus on (optional)
+    - `time_range_years`: Years of history to search (default: 50)
+    - `include_indigenous_knowledge`: Include indigenous/local knowledge (default: true)
+    - `max_sources`: Maximum number of sources to find (default: 10)
+
+    **Returns:** ResearchResult with comprehensive AI-powered findings
+    """
+    try:
+        if not query.location:
+            raise HTTPException(status_code=400, detail="Location is required")
+
+        result = await research_agent.conduct_research(query)
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI research failed: {str(e)}")
+
+@app.post("/ai/research/batch")
+async def ai_batch_research(
+    locations: List[str],
+    hazard_type: Optional[AIHazardType] = None,
+    time_range_years: int = 50
+):
+    """
+    Conduct AI research on multiple locations.
+
+    **Request Body:**
+    - `locations`: List of location names
+    - `hazard_type`: Optional hazard type focus
+    - `time_range_years`: Years of history to search
+
+    **Returns:** Dictionary mapping locations to AI research results
+    """
+    try:
+        if not locations:
+            raise HTTPException(status_code=400, detail="No locations provided")
+
+        if len(locations) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 locations per batch")
+
+        results = {}
+        for location in locations:
+            query = ResearchQuery(
+                location=location,
+                hazard_type=hazard_type,
+                time_range_years=time_range_years
+            )
+
+            try:
+                result = await research_agent.conduct_research(query)
+                results[location] = result
+            except Exception as e:
+                results[location] = {"error": str(e)}
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI batch research failed: {str(e)}")
+
+@app.get("/ai/supported-formats")
+async def ai_get_supported_formats():
+    """Get list of supported file formats for AI processing"""
+    return {
+        "supported_extensions": list(FileProcessor.SUPPORTED_EXTENSIONS),
+        "max_file_size_mb": AIConfig.MAX_FILE_SIZE / (1024 * 1024)
+    }
+
+@app.get("/ai/config")
+async def ai_get_config():
+    """Get current AI configuration (non-sensitive)"""
+    return {
+        "lore_weights": AIConfig.LORE_WEIGHTS,
+        "source_credibility": AIConfig.SOURCE_CREDIBILITY,
+        "hazard_types": AIConfig.HAZARD_TYPES,
+        "models": {
+            "extraction": AIConfig.OPENAI_MODEL,
+            "research": AIConfig.OPENAI_RESEARCH_MODEL
+        },
+        "recency_config": {
+            "decay_rate": AIConfig.DECAY_RATE,
+            "cultural_memory_enabled": AIConfig.CULTURAL_MEMORY_ENABLED,
+            "cultural_memory_baseline": AIConfig.CULTURAL_MEMORY_BASELINE
+        }
+    }
 
 # ===== LOCATION ENDPOINTS =====
 
@@ -1319,118 +1558,210 @@ class DiscoverLoreRequest(BaseModel):
     created_by: str = "system"
 
 # =============================================================================
-# AI AGENT PLACEHOLDER FUNCTIONS
+# AI AGENT HELPER FUNCTIONS
 # =============================================================================
-# These functions are placeholders that will be replaced with actual AI agent
-# implementations later. They simulate AI processing for now.
+# These functions integrate the real AI agents with the lore collection system
 # =============================================================================
 
-def ai_agent_analyze_story(story_id: int, story_text: str, file_path: Optional[str] = None) -> dict:
+async def ai_agent_analyze_story(story_id: int, story_text: str, file_path: Optional[str] = None) -> dict:
     """
-    PLACEHOLDER: AI agent analyzes user-provided story to extract:
+    AI agent analyzes user-provided story to extract:
     - Event date (recency)
     - Event type (what happened)
     - Spatial information (where)
     - Credibility score
 
-    TODO: Replace with actual AI agent call
+    Uses the real DocumentExtractionAgent to analyze the story
     """
-    import time
-    import random
+    try:
+        # Create extraction request
+        request = ExtractionRequest(
+            text=story_text,
+            location_context=None,
+            current_date=datetime.now()
+        )
 
-    # Simulate AI processing time
-    time.sleep(0.5)
+        # Call the real extraction agent
+        results = await extraction_agent.extract_from_text(request)
 
-    # Return simulated AI analysis
-    return {
-        "ai_event_date": "1952-03-15",  # Extracted from story text
-        "ai_event_type": "landslide",
-        "ai_recency_score": 0.4,  # 1952 is moderately old
-        "ai_spatial_relevance": 0.8,  # Specific location mentioned
-        "ai_credibility_score": 0.7,  # Oral tradition, second-hand account
-        "ai_confidence": 0.75,
-        "ai_summary": "Historical landslide event near Eagle Creek in 1952, triggered by prolonged rainfall. Oral tradition account from family member.",
-        "ai_extracted_locations": [
-            {"name": "Eagle Creek", "latitude": 45.3725, "longitude": -121.7055, "confidence": 0.8}
-        ]
-    }
+        if not results or len(results) == 0:
+            return {
+                "ai_event_date": None,
+                "ai_event_type": "unknown",
+                "ai_recency_score": 0.0,
+                "ai_spatial_relevance": 0.0,
+                "ai_credibility_score": 0.0,
+                "ai_confidence": 0.0,
+                "ai_summary": "No events extracted from the story",
+                "ai_extracted_locations": []
+            }
 
-def ai_agent_discover_lore(latitude: float, longitude: float, radius_m: float) -> dict:
+        # Take the first (most relevant) extraction
+        extraction = results[0]
+
+        # Convert to lore_stories format
+        return {
+            "ai_event_date": extraction.event_date.isoformat() if extraction.event_date else None,
+            "ai_event_type": "landslide",  # Default to landslide
+            "ai_recency_score": extraction.recent_score or 0.0,
+            "ai_spatial_relevance": extraction.spatial_score or 0.0,
+            "ai_credibility_score": extraction.credibility_score or 0.0,
+            "ai_confidence": extraction.confidence_band or 0.0,
+            "ai_summary": extraction.event_narrative,
+            "ai_extracted_locations": [
+                {
+                    "name": extraction.place_name,
+                    "latitude": None,  # Would need geocoding
+                    "longitude": None,
+                    "confidence": extraction.confidence_band or 0.0
+                }
+            ]
+        }
+
+    except Exception as e:
+        # Return error result
+        return {
+            "ai_event_date": None,
+            "ai_event_type": "unknown",
+            "ai_recency_score": 0.0,
+            "ai_spatial_relevance": 0.0,
+            "ai_credibility_score": 0.0,
+            "ai_confidence": 0.0,
+            "ai_summary": f"AI analysis failed: {str(e)}",
+            "ai_extracted_locations": []
+        }
+
+async def ai_agent_discover_lore(latitude: float, longitude: float, radius_m: float) -> dict:
     """
-    PLACEHOLDER: AI agent searches for lore/historical information at a location
+    AI agent searches for lore/historical information at a location using DeepResearchAgent
     - Searches historical databases
     - Searches news archives
     - Searches indigenous knowledge repositories
     - Searches scientific literature
-
-    TODO: Replace with actual AI agent call
     """
-    import time
+    try:
+        # Create a location string for research (lat, lon)
+        location_str = f"{latitude:.6f}, {longitude:.6f}"
 
-    # Simulate AI search time
-    time.sleep(1.0)
+        # Create research query
+        query = ResearchQuery(
+            location=location_str,
+            hazard_type=None,  # Search all hazard types
+            time_range_years=100,  # Look back 100 years
+            include_indigenous_knowledge=True,
+            max_sources=10
+        )
 
-    # Return simulated discovered lore
-    return {
-        "found_stories": [
-            {
-                "title": "USGS landslide inventory entry",
-                "story_text": "Debris flow documented in 1996 USGS landslide inventory, triggered by intense rainfall event.",
-                "ai_event_date": "1996-02-09",
-                "ai_event_type": "debris_flow",
-                "ai_recency_score": 0.65,
-                "ai_spatial_relevance": 0.95,
-                "ai_credibility_score": 0.95,  # USGS = high credibility
-                "source": "USGS Landslide Inventory"
+        # Call the real research agent
+        result = await research_agent.conduct_research(query)
+
+        # Convert findings to lore_stories format
+        found_stories = []
+        for finding in result.findings:
+            found_stories.append({
+                "title": finding.source_title or "Historical Event",
+                "story_text": finding.event_narrative,
+                "ai_event_date": finding.event_date.isoformat() if finding.event_date else None,
+                "ai_event_type": "landslide",  # Default
+                "ai_recency_score": finding.recent_score or 0.0,
+                "ai_spatial_relevance": finding.spatial_score or 0.0,
+                "ai_credibility_score": finding.credibility_score or 0.0,
+                "source": finding.source_title or "Unknown"
+            })
+
+        return {
+            "found_stories": found_stories,
+            "search_metadata": {
+                "sources_searched": ["research_agent"],
+                "total_matches": len(found_stories),
+                "confidence": result.confidence,
+                "summary": result.summary
             }
-        ],
-        "search_metadata": {
-            "sources_searched": ["USGS", "local_newspapers", "tribal_archives"],
-            "total_matches": 1,
-            "search_duration_ms": 1000
         }
-    }
 
-def ai_agent_search_observation(observation_sight: str, observation_sound: str, latitude: float, longitude: float) -> dict:
+    except Exception as e:
+        # Return empty results on error
+        return {
+            "found_stories": [],
+            "search_metadata": {
+                "sources_searched": [],
+                "total_matches": 0,
+                "error": str(e)
+            }
+        }
+
+async def ai_agent_search_observation(observation_sight: str, observation_sound: str, latitude: float, longitude: float) -> dict:
     """
-    PLACEHOLDER: AI agent searches for information based on user observations
+    AI agent searches for information based on user observations using extraction agent
     - Analyzes sight description (e.g., "fresh scarp")
     - Analyzes sound description (e.g., "cracking sounds")
     - Searches for similar reports
     - Assesses urgency/risk
-
-    TODO: Replace with actual AI agent call
     """
-    import time
+    try:
+        # Combine observations into text for extraction
+        observation_text = f"Field observation at location {latitude}, {longitude}:\n"
+        if observation_sight:
+            observation_text += f"Visual observation: {observation_sight}\n"
+        if observation_sound:
+            observation_text += f"Audio observation: {observation_sound}\n"
 
-    # Simulate AI search time
-    time.sleep(0.8)
+        # Create extraction request
+        request = ExtractionRequest(
+            text=observation_text,
+            location_context=f"{latitude}, {longitude}",
+            current_date=datetime.now()
+        )
 
-    # Return simulated search results
-    return {
-        "interpretation": "Observations consistent with active slope deformation. Fresh scarp and cracking sounds indicate recent movement.",
-        "similar_cases": [
-            {
-                "title": "Similar scarp reported 2km north in 2023",
-                "description": "Fresh scarp with cracking sounds preceded slope failure by 3 days",
-                "relevance": 0.9
+        # Call extraction agent to analyze the observation
+        results = await extraction_agent.extract_from_text(request)
+
+        if results and len(results) > 0:
+            extraction = results[0]
+
+            return {
+                "interpretation": extraction.event_narrative,
+                "similar_cases": [],  # Would need separate research
+                "ai_event_type": "field_observation",
+                "ai_recency_score": 0.95,  # Very recent observation
+                "ai_spatial_relevance": 1.0,  # Exact location
+                "ai_credibility_score": extraction.credibility_score or 0.85,
+                "ai_confidence": extraction.confidence_band or 0.8,
+                "urgency_level": "medium",
+                "recommended_action": "Monitor and document the observation"
             }
-        ],
-        "ai_event_type": "slope_deformation",
-        "ai_recency_score": 0.95,  # Very recent observation
-        "ai_spatial_relevance": 1.0,  # Exact location
-        "ai_credibility_score": 0.85,  # Direct observation
-        "ai_confidence": 0.8,
-        "urgency_level": "high",  # Active deformation = high urgency
-        "recommended_action": "Field investigation recommended within 24 hours"
-    }
+        else:
+            return {
+                "interpretation": observation_text,
+                "similar_cases": [],
+                "ai_event_type": "field_observation",
+                "ai_recency_score": 0.95,
+                "ai_spatial_relevance": 1.0,
+                "ai_credibility_score": 0.85,
+                "ai_confidence": 0.5,
+                "urgency_level": "low",
+                "recommended_action": "Observation recorded"
+            }
+
+    except Exception as e:
+        return {
+            "interpretation": f"Error analyzing observation: {str(e)}",
+            "similar_cases": [],
+            "ai_event_type": "unknown",
+            "ai_recency_score": 0.0,
+            "ai_spatial_relevance": 0.0,
+            "ai_credibility_score": 0.0,
+            "ai_confidence": 0.0,
+            "urgency_level": "unknown",
+            "recommended_action": "Error occurred during analysis"
+        }
 
 # =============================================================================
 # LORE ENDPOINTS
 # =============================================================================
 
 @app.post("/api/lore/submit-story")
-def submit_lore_story(request: SubmitStoryRequest):
+async def submit_lore_story(request: SubmitStoryRequest):
     """
     Scenario 1: User provides a story/lore with title and optional location
     The story text or file will be analyzed by AI agent to extract:
@@ -1496,8 +1827,8 @@ def submit_lore_story(request: SubmitStoryRequest):
                 """, {'job_id': job_id})
                 conn.commit()
 
-                # Call AI agent (placeholder)
-                ai_results = ai_agent_analyze_story(
+                # Call AI agent (real implementation)
+                ai_results = await ai_agent_analyze_story(
                     story_id,
                     request.story_text or "",
                     request.file_path
@@ -1573,15 +1904,15 @@ def submit_lore_story(request: SubmitStoryRequest):
         conn.close()
 
 @app.post("/api/lore/discover-at-location")
-def discover_lore_at_location(request: DiscoverLoreRequest):
+async def discover_lore_at_location(request: DiscoverLoreRequest):
     """
     Scenario 2: AI finds lore at a given location
     AI searches historical databases, news archives, indigenous knowledge, etc.
     """
     conn = get_conn()
     try:
-        # PLACEHOLDER: Call AI agent to discover lore
-        ai_results = ai_agent_discover_lore(
+        # Call AI agent to discover lore (real implementation)
+        ai_results = await ai_agent_discover_lore(
             request.latitude,
             request.longitude,
             request.location_radius_m
@@ -1642,7 +1973,7 @@ def discover_lore_at_location(request: DiscoverLoreRequest):
         conn.close()
 
 @app.post("/api/lore/submit-observation")
-def submit_observation(request: SubmitObservationRequest):
+async def submit_observation(request: SubmitObservationRequest):
     """
     Scenario 3: User observes something (sight/sound) at a location
     AI searches for information based on the observation
@@ -1698,7 +2029,7 @@ def submit_observation(request: SubmitObservationRequest):
             job_id = cur.fetchone()['job_id']
             conn.commit()
 
-            # PLACEHOLDER: Call AI agent to search based on observation
+            # Call AI agent to search based on observation (real implementation)
             try:
                 # Update job status
                 cur.execute("""
@@ -1708,8 +2039,8 @@ def submit_observation(request: SubmitObservationRequest):
                 """, {'job_id': job_id})
                 conn.commit()
 
-                # Call AI agent (placeholder)
-                ai_results = ai_agent_search_observation(
+                # Call AI agent (real implementation)
+                ai_results = await ai_agent_search_observation(
                     request.observation_sight or "",
                     request.observation_sound or "",
                     request.latitude,
@@ -1999,9 +2330,24 @@ def get_statistics():
 
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting GEORISKMOD API Server...")
+    print("=" * 80)
+    print("🚀 Starting GEORISKMOD Unified API Server (v2.0.0)")
+    print("=" * 80)
+    print("📍 Main Server: http://localhost:8001")
     print("📚 API Documentation: http://localhost:8001/docs")
-    print("🏥 Health Check: http://localhost:8001/api/health")
-    print("⚠️  Note: Using port 8001 (port 8000 is used by AI agents backend)")
+    print("🏥 Database Health: http://localhost:8001/api/health")
+    print("🤖 AI Agents Health: http://localhost:8001/ai/health")
+    print("")
+    print("🔬 AI Capabilities:")
+    print("   - Document Extraction: /ai/extract/text, /ai/extract/file")
+    print("   - Deep Research: /ai/research")
+    print("   - Lore Collection: /api/lore/*")
+    print("")
+    print("📊 GEORISKMOD Services:")
+    print("   - Risk Assessment: /api/calculate-risk")
+    print("   - H/L/V Factors: /api/h-factor, /api/l-factor-story, /api/v-factor")
+    print("   - Data Management: /api/locations, /api/events, /api/data-sources")
+    print("=" * 80)
+
     uvicorn.run(app, host="0.0.0.0", port=8001)
 
