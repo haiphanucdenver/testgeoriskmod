@@ -1,0 +1,24 @@
+[Unit]
+Description=GeoRisk API Server
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=bitnami
+Group=bitnami
+WorkingDirectory=/home/bitnami/my-app
+Environment="PATH=/opt/bitnami/python/bin:/usr/local/bin:/usr/bin:/bin"
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/opt/bitnami/python/bin/python3.13 api_server.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
