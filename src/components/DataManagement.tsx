@@ -1,4 +1,3 @@
-// AI-Driven Lore Collection with extraction_agent and research_agent
 import { Button } from "./ui/button";
 import { Card } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -62,7 +61,6 @@ import {
   Eye,
   Sparkles,
 } from "lucide-react";
-import React from "react";
 import { useState, useEffect } from "react";
 import { dataSourceAPI, loreAPI, riskCalculationAPI, eventAPI, locationAPI, hFactorAPI, lFactorAPI, vFactorAPI, getErrorMessage, checkAPIConnection } from "../services/api";
 import type { DataSource } from "../services/api";
@@ -249,14 +247,18 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const [storyForm, setStoryForm] = useState({
     title: '',
     story_text: '',
-    location_description: ''
-    // AI extracts: recency, credibility, spatial relevance automatically
+    location_description: '',
+    recency_years: '',
+    credibility: '',
+    spatial_relevance_m: ''
   });
   const [discoverForm, setDiscoverForm] = useState({
     latitude: mapLocation.lat,
     longitude: mapLocation.lng,
-    location_radius_m: 10000
-    // AI discovers lore and extracts all metadata automatically
+    location_radius_m: 10000,
+    recency_years: '',
+    credibility: '',
+    spatial_relevance_m: ''
   });
   const [observationForm, setObservationForm] = useState({
     title: '',
@@ -264,7 +266,6 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     longitude: mapLocation.lng,
     observation_sight: '',
     observation_sound: '',
-    // added fields used elsewhere in the file
     recency_years: '',
     credibility: '',
     spatial_relevance_m: ''
@@ -671,8 +672,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         lastModified: now
       };
 
-      // push the constructed loreEntry (was using `event` which is undefined)
-      setLocalLoreEntries(prev => [...prev, loreEntry]);
+      setLocalLoreEntries(prev => [...prev, event]);
 
       // Add to change log
       setLoreChangeLog(prev => [...prev, {
@@ -694,9 +694,11 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       });
 
       // Update Local Lore status to uploaded if first event
-      setLocalLoreData(prev => prev.map(item =>
-        item.id === 'local-lore-entries' ? { ...item, status: 'uploaded' as const } : item
-      ));
+      if (localLoreEntries.length === 0) {
+        setLocalLoreData(prev => prev.map(item =>
+          item.id === 'local-lore-entries' ? { ...item, status: 'uploaded' as const } : item
+        ));
+      }
 
       toast.success(`L Factor story saved to database! Lore ID: ${response.lore_id}`);
     } catch (error) {
@@ -713,17 +715,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       // Call backend API to delete event from local_lore table
       await lFactorAPI.delete(loreEntryId);
 
-      // Use functional update to ensure we compute remaining entries correctly,
-      // and update Local Lore data status if no events left.
-      setLocalLoreEntries(prev => {
-        const remaining = prev.filter(e => e.id !== loreEntryId);
-        if (remaining.length === 0) {
-          setLocalLoreData(p => p.map(item =>
-            item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
-          ));
-        }
-        return remaining;
-      });
+      setLocalLoreEntries(prev => prev.filter(e => e.id !== loreEntryId));
 
       // Add to change log
       if (deletedLoreEntry) {
@@ -734,6 +726,13 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
           changes: `Deleted ${deletedLoreEntry.eventType} lore entry: ${deletedLoreEntry.recency}`,
           previousData: deletedLoreEntry
         }]);
+      }
+
+      // Update Local Lore status back to missing if no events left
+      if (localLoreEntries.length === 1) {
+        setLocalLoreData(prev => prev.map(item =>
+          item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
+        ));
       }
 
       toast.success('L Factor story deleted successfully');
@@ -767,26 +766,19 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     try {
       const now = new Date();
-      // Ensure we get a nullable original entry rather than risking undefined usage
-      const originalLoreEntry = localLoreEntries.find(e => e.id === editingLoreEntryId) || null;
+      const originalLoreEntry = localLoreEntries.find(e => e.id === editingLoreEntryId);
 
-      // Build changes description (typed and defensive)
-      const changes: string[] = [];
+      // Build changes description
+      const changes = [];
       if (originalLoreEntry) {
-        const prev = originalLoreEntry;
-        const curr = editingLoreEntry;
-
-        if (curr.eventType && curr.eventType !== prev.eventType) {
-          changes.push(`type: ${prev.eventType} -> ${curr.eventType}`);
+        if (editingLoreEntry.eventType && editingLoreEntry.eventType !== originalLoreEntry.eventType) {
+          changes.push(`type: ${originalLoreEntry.eventType} → ${editingLoreEntry.eventType}`);
         }
-
-        // Only compare recency when a numeric value is provided
-        if (typeof curr.recency === 'number' && curr.recency !== prev.recency) {
-          changes.push(`recency: ${prev.recency} years -> ${curr.recency} years`);
+        if (editingLoreEntry.recency !== undefined && editingLoreEntry.recency !== originalLoreEntry.recency) {
+          changes.push(`recency: ${originalLoreEntry.recency} years → ${editingLoreEntry.recency} years`);
         }
-
-        if (curr.credibility && curr.credibility !== prev.credibility) {
-          changes.push(`credibility: ${prev.credibility} -> ${curr.credibility}`);
+        if (editingLoreEntry.credibility && editingLoreEntry.credibility !== originalLoreEntry.credibility) {
+          changes.push(`credibility: ${originalLoreEntry.credibility} → ${editingLoreEntry.credibility}`);
         }
       }
 
@@ -854,66 +846,23 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const handleToggleSelectEvent = (loreEntryId: string) => {
     setSelectedLoreEntryIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(loreEntryId)) {
-        newSet.delete(loreEntryId);
+      if (newSet.has(eventId)) {
+        newSet.delete(eventId);
       } else {
-        newSet.add(loreEntryId);
+        newSet.add(eventId);
       }
       return newSet;
     });
   };
- 
-  // Helper: compute filtered & sorted lore entries (used by UI and selection helpers)
-  const getFilteredAndSortedLoreEntries = () => {
-    const filtered = localLoreEntries
-      .filter(loreEntry => {
-        // Search filter (searches across multiple fields)
-        const searchLower = searchQuery.toLowerCase();
-        const matchesSearch = searchQuery === '' ||
-          loreEntry.eventType.toLowerCase().includes(searchLower) ||
-          loreEntry.recency.toString().includes(searchLower) ||
-          loreEntry.location.toLowerCase().includes(searchLower) ||
-          loreEntry.description.toLowerCase().includes(searchLower) ||
-          loreEntry.source.toLowerCase().includes(searchLower);
-
-        // Credibility filter
-        const matchesCredibility = filterCredibility === 'all' || loreEntry.credibility === filterCredibility;
-
-        // Event type filter
-        const matchesEventType = filterLoreType === 'all' || loreEntry.eventType.toLowerCase().includes(filterLoreType.toLowerCase());
-
-        return matchesSearch && matchesCredibility && matchesEventType;
-      });
-
-    const sorted = filtered.sort((a, b) => {
-      let comparison = 0;
-
-      if (sortField === 'date') {
-        const aDate = a.createdAt ? a.createdAt.toISOString() : '';
-        const bDate = b.createdAt ? b.createdAt.toISOString() : '';
-        comparison = aDate.localeCompare(bDate);
-      } else if (sortField === 'eventType') {
-        comparison = a.eventType.localeCompare(b.eventType);
-      } else if (sortField === 'credibility') {
-        const credibilityOrder: Record<string, number> = { 'instrumented': 1, 'eyewitness': 2, 'expert': 3, 'newspaper': 4, 'oral-tradition': 5 };
-        comparison = (credibilityOrder[a.credibility] || 99) - (credibilityOrder[b.credibility] || 99);
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    return sorted;
-  };
 
   // Handle select all visible events
   const handleSelectAllVisible = () => {
-    const visible = getFilteredAndSortedLoreEntries();
-    if (selectedLoreEntryIds.size === visible.length) {
+    if (selectedLoreEntryIds.size === filteredAndSortedLoreEntries.length) {
       // If all visible are selected, deselect all
       setSelectedLoreEntryIds(new Set());
     } else {
       // Select all visible events
-      setSelectedLoreEntryIds(new Set(visible.map(e => e.id)));
+      setSelectedLoreEntryIds(new Set(filteredAndSortedLoreEntries.map(e => e.id)));
     }
   };
 
@@ -921,18 +870,15 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const handleBulkDelete = () => {
     if (selectedLoreEntryIds.size === 0) return;
 
-    setLocalLoreEntries(prev => {
-      const remaining = prev.filter(e => !selectedLoreEntryIds.has(e.id));
-      // Update Local Lore status back to missing if no events left
-      if (remaining.length === 0) {
-        setLocalLoreData(p => p.map(item =>
-          item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
-        ));
-      }
-      return remaining;
-    });
-
+    setLocalLoreEntries(prev => prev.filter(e => !selectedLoreEntryIds.has(e.id)));
     setSelectedLoreEntryIds(new Set());
+
+    // Update Local Lore status back to missing if no events left
+    if (localLoreEntries.length === selectedLoreEntryIds.size) {
+      setLocalLoreData(prev => prev.map(item =>
+        item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
+      ));
+    }
   };
 
   // Handle bulk export
@@ -1026,6 +972,73 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     document.body.removeChild(link);
   };
 
+  // Filter and sort local lore entries
+  const filteredAndSortedLoreEntries = localLoreEntries
+    .filter(loreEntry => {
+      // Search filter (searches across multiple fields)
+      const searchLower = searchQuery.toLowerCase();
+      const matchesSearch = searchQuery === '' ||
+        loreEntry.eventType.toLowerCase().includes(searchLower) ||
+        loreEntry.recency.toString().includes(searchLower) ||
+        loreEntry.location.toLowerCase().includes(searchLower) ||
+        loreEntry.description.toLowerCase().includes(searchLower) ||
+        loreEntry.source.toLowerCase().includes(searchLower);
+
+      // Credibility filter
+      const matchesCredibility = filterCredibility === 'all' || loreEntry.credibility === filterCredibility;
+
+      // Event type filter
+      const matchesEventType = filterLoreType === 'all' || loreEntry.eventType.toLowerCase().includes(filterLoreType.toLowerCase());
+
+      return matchesSearch && matchesCredibility && matchesEventType;
+    })
+    .sort((a, b) => {
+      let comparison = 0;
+
+      if (sortField === 'date') {
+        // Simple string comparison for dates (works for many formats like "1996", "March 2020", "2020-03-15")
+        comparison = a.date.localeCompare(b.date);
+      } else if (sortField === 'eventType') {
+        comparison = a.eventType.localeCompare(b.eventType);
+      } else if (sortField === 'credibility') {
+        const credibilityOrder = { 'instrumented': 1, 'eyewitness': 2, 'expert': 3, 'newspaper': 4, 'oral-tradition': 5 };
+        comparison = (credibilityOrder[a.credibility] || 99) - (credibilityOrder[b.credibility] || 99);
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+  // Get unique event types for filter dropdown
+  const uniqueEventTypes = Array.from(new Set(localLoreEntries.map(e => e.eventType).filter(t => t)));
+
+  // Calculate statistics
+  const statistics = {
+    total: localLoreEntries.length,
+    byType: localLoreEntries.reduce((acc, event) => {
+      acc[loreEntry.eventType] = (acc[loreEntry.eventType] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>),
+    byCredibility: localLoreEntries.reduce((acc, event) => {
+      acc[loreEntry.credibility] = (acc[loreEntry.credibility] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>),
+    dateRange: localLoreEntries.length > 0 ? {
+      earliest: localLoreEntries.map(e => e.date).sort()[0],
+      latest: localLoreEntries.map(e => e.date).sort()[localLoreEntries.length - 1]
+    } : null
+  };
+
+  // Clear all filters
+  const clearFilters = () => {
+    setSearchQuery('');
+    setFilterCredibility('all');
+    setFilterLoreType('all');
+  };
+
+  const hasActiveFilters = searchQuery !== '' || filterCredibility !== 'all' || filterLoreType !== 'all';
+
+  // ========== AI-DRIVEN LORE COLLECTION HANDLERS ==========
+
   // Load lore stories from database
   const loadLoreStories = async () => {
     try {
@@ -1047,155 +1060,29 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     const loadingToast = toast.loading('Submitting story to AI for analysis...');
 
-    // Build payload once (used by primary API and fallback)
-    const payload = {
-      title: storyForm.title,
-      story_text: storyForm.story_text,
-      location_description: storyForm.location_description,
-      latitude: mapLocation.lat,
-      longitude: mapLocation.lng,
-      created_by: 'Current User'
-    };
-
     try {
-      // Try the primary API wrapper first
-      let response = await loreAPI.submitStory(payload);
-
-      // If the wrapper returns a fetch-like Response, normalize to object
-      if (response instanceof Response) {
-        response = await response.json();
-      }
+      const response = await loreAPI.submitStory({
+        title: storyForm.title,
+        story_text: storyForm.story_text,
+        location_description: storyForm.location_description,
+        created_by: 'Current User'
+      });
 
       toast.dismiss(loadingToast);
 
-      // Defensive handling of AI response
-      const aiStatus = (response as any)?.ai_status;
-      const aiResults = (response as any)?.ai_results;
-
-      if (aiStatus === 'completed') {
-        toast.success(`Story analyzed successfully! L-Score: ${(response as any).l_score?.toFixed?.(3) ?? (response as any).l_score} | Lore ID: ${(response as any).lore_id}`);
+      if (response.ai_status === 'completed') {
+        toast.success(`Story analyzed successfully! AI extracted: ${response.ai_results?.ai_event_type || 'information'}`);
       } else {
-        // Use available message fields or fallback
-        const errMsg = (response as any)?.message ?? (response as any)?.error ?? 'Story submitted but AI analysis failed';
-        toast.error(typeof errMsg === 'string' ? errMsg : 'Story submitted but AI analysis failed');
+        toast.error(`Story submitted but AI analysis failed: ${response.error}`);
       }
 
-      // Mark L Factor as saved and reload
-      setLDataSaved(true);
+      // Clear form and reload stories
       setStoryForm({ title: '', story_text: '', location_description: '' });
       await loadLoreStories();
     } catch (error) {
-      // Primary call failed (network / wrapper). Attempt a simple fetch fallback before giving up.
-      console.warn('Primary loreAPI.submitStory failed, attempting direct fetch fallback:', error);
-
-      try {
-        // Prefer explicit VITE_API_BASE_URL, fall back to window.location.origin.
-        // Do NOT append "/api" here — construct a broad set of candidates so one matches your backend.
-        const BASE_CANDIDATE = ((import.meta as any)?.env?.VITE_API_BASE_URL || '').replace(/\/$/, '');
-        const apiRoot = BASE_CANDIDATE || window.location.origin;
-
-        const normalize = (u: string) => u.replace(/\/+$/, '');
-        const baseRoot = normalize(apiRoot);
-
-        // Expanded candidate list - covers common variants, API versioning and ai wrappers.
-        const candidates = [
-          // common "API" prefixes
-          `${baseRoot}/api/lore/submit`,
-          `${baseRoot}/lore/submit`,
-          `${baseRoot}/api/lore`,
-          `${baseRoot}/lore`,
-
-          // ai wrapper / agent endpoints
-          `${baseRoot}/api/ai/lore/submit`,
-          `${baseRoot}/ai/lore/submit`,
-          `${baseRoot}/api/ai/submit`,
-          `${baseRoot}/ai/submit`,
-
-          // stories endpoints
-          `${baseRoot}/api/stories/submit`,
-          `${baseRoot}/stories/submit`,
-          `${baseRoot}/api/stories`,
-          `${baseRoot}/stories`,
-
-          // versioned APIs
-          `${baseRoot}/api/v1/lore/submit`,
-          `${baseRoot}/api/v1/stories/submit`,
-
-          // generic submit endpoints (last resort)
-          `${baseRoot}/submit`,
-          `${baseRoot}/api/submit`,
-        ];
-
-        console.info('Fallback candidates using apiRoot:', apiRoot);
-
-        const errors: string[] = [];
-        let successJson: any = null;
-        let successUrl: string | null = null;
-
-        for (const url of candidates) {
-          try {
-            console.info('Attempting fallback endpoint:', url);
-            const resp = await fetch(url, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
-            });
-
-            if (!resp.ok) {
-              // capture response body (truncated) to aid debugging
-              const txt = await resp.text().catch(() => '');
-              const short = typeof txt === 'string' && txt.length > 400 ? txt.slice(0, 400) + '…' : txt;
-              errors.push(`${url} -> ${resp.status} ${resp.statusText}${short ? ` : ${short}` : ''}`);
-              console.warn('Fallback endpoint failed:', url, resp.status, resp.statusText);
-              continue;
-            }
-
-            // success
-            successJson = await resp.json().catch(() => null);
-            successUrl = url;
-            break;
-          } catch (e: any) {
-            console.warn('Fetch attempt error for', url, e);
-            errors.push(`${url} -> ${e?.message || String(e)}`);
-          }
-        }
-
-        toast.dismiss(loadingToast);
-
-        if (!successJson) {
-          const combined = errors.join(' | ');
-          // log full detail to console for debugging
-          console.error('No fallback endpoint succeeded. Tried endpoints:', candidates, 'errors:', errors);
-
-          // show concise guidance to user with a few example failures
-          toast.error(
-            `No fallback endpoint succeeded (checked ${candidates.length} URLs). ` +
-            `Open console for details. Common fixes: set VITE_API_BASE_URL in .env to your backend root (e.g. VITE_API_BASE_URL=http://localhost:3001) and restart the dev server.`
-          );
-
-          // also throw so outer catch shows message / telemetry if present
-          throw new Error(
-            `No fallback endpoint succeeded. Tried ${candidates.length} endpoints. First failures: ${errors.slice(0,5).join(' | ')}`
-          );
-        }
-
-        // Handle fallback response similarly
-        if (successJson?.ai_status === 'completed') {
-          toast.success(`Story analyzed successfully! L-Score: ${successJson.l_score?.toFixed?.(3) ?? successJson.l_score} | Lore ID: ${successJson.lore_id} (via ${successUrl})`);
-        } else {
-          const errMsg = successJson?.message ?? successJson?.error ?? `Story submitted but AI analysis failed (endpoint: ${successUrl})`;
-          toast.error(typeof errMsg === 'string' ? errMsg : 'Story submitted but AI analysis failed');
-        }
-
-        setLDataSaved(true);
-        setStoryForm({ title: '', story_text: '', location_description: '' });
-        await loadLoreStories();
-      } catch (fallbackError) {
-        toast.dismiss(loadingToast);
-        console.error('Failed to submit story (primary + fallback):', fallbackError);
-        const message = getErrorMessage(fallbackError) || 'Failed to submit story: network or server error';
-        toast.error(message);
-      }
+      toast.dismiss(loadingToast);
+      console.error('Failed to submit story:', error);
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -1218,14 +1105,11 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
       toast.dismiss(loadingToast);
 
-      if (response.lore_ids && response.lore_ids.length > 0) {
-        toast.success(`AI discovered ${response.lore_ids.length} lore stories! Location ID: ${response.location_id}`);
+      if (response.story_ids.length > 0) {
+        toast.success(`AI discovered ${response.story_ids.length} lore stories at this location!`);
       } else {
         toast.info('No lore found at this location. Try expanding the search radius.');
       }
-
-      // Mark L Factor as saved
-      setLDataSaved(true);
 
       // Reload stories
       await loadLoreStories();
@@ -1258,37 +1142,16 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
       toast.dismiss(loadingToast);
 
-      // Defensive handling of AI response
-      const aiStatus = response?.ai_status;
-      const aiResults = response?.ai_results;
-
-      if (aiStatus === 'completed') {
-        const interpretation = typeof aiResults?.interpretation === 'string'
-          ? aiResults.interpretation
-          : (aiResults?.summary ?? 'No interpretation returned');
-
-        const urgency = (aiResults?.urgency_level ?? aiResults?.urgency ?? 'normal') as string;
-
-        if (urgency.toString().toLowerCase() === 'high' || urgency.toString().toLowerCase() === 'urgent') {
-          toast.error(`URGENT: ${interpretation}`, { duration: 10000 });
+      if (response.ai_status === 'completed') {
+        const urgency = response.ai_results?.urgency_level;
+        if (urgency === 'high') {
+          toast.error(`URGENT: ${response.ai_results?.interpretation}`, { duration: 10000 });
         } else {
-          toast.success(`Observation analyzed: ${interpretation}`);
+          toast.success(`Observation analyzed: ${response.ai_results?.interpretation}`);
         }
       } else {
-        // Defensive: build a readable error message even if response shape varies
-        // Use the known 'message' field and fall back to any legacy error fields if present.
-        const errField = response?.message ?? (response as any)?.error ?? (response as any)?.error_message;
-        const fallback = 'Observation submitted but AI analysis failed';
-        const errMessage =
-          typeof errField === 'string'
-            ? errField
-            : (typeof response === 'string' ? response : fallback);
-
-        toast.error(errMessage);
+        toast.error(`Observation submitted but AI analysis failed: ${response.error}`);
       }
-
-      // Mark L Factor as saved
-      setLDataSaved(true);
 
       // Clear form and reload stories
       setObservationForm({
@@ -1296,10 +1159,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         latitude: mapLocation.lat,
         longitude: mapLocation.lng,
         observation_sight: '',
-        observation_sound: '',
-        recency_years: '',
-        credibility: '',
-        spatial_relevance_m: ''
+        observation_sound: ''
       });
       await loadLoreStories();
     } catch (error) {
@@ -1318,12 +1178,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
   // Fetch location name using reverse geocoding
   useEffect(() => {
-    // Use a safe access pattern for Vite env (TypeScript-friendly)
-    const MAPBOX_API_KEY = (import.meta as any)?.env?.VITE_MAPBOX_API_KEY || '';
-
+    const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY;
     if (!MAPBOX_API_KEY || MAPBOX_API_KEY === 'YOUR_MAPBOX_API_KEY_HERE') {
       setLocationName("Mount Hood Area, Oregon, USA");
-      setIsLoadingLocation(false);
       return;
     }
 
@@ -1351,7 +1208,6 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     return () => clearTimeout(timeoutId);
   }, [mapLocation.lat, mapLocation.lng]);
-
 
   // Fetch elevation data
   useEffect(() => {
@@ -1783,18 +1639,67 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     try {
       setIsSubmittingL(true);
 
-      // For L Factor, we just validate that some data has been entered
-      // The actual submission happens through the lore API in the L Factor forms
+      // Validate required L factor inputs based on current scenario
+      if (loreScenario === 'story') {
+        if (!storyForm.title || !storyForm.story_text) {
+          toast.error('L Factor: Title and Story are required');
+          return;
+        }
+        if (!storyForm.credibility) {
+          toast.error('L Factor: Credibility is required');
+          return;
+        }
 
-      // Save indicator to localStorage
-      localStorage.setItem('georiskmod_l_data_saved', 'true');
+        // Determine spatial accuracy based on spatial relevance distance
+        let spatialAccuracy = 'general-area'; // default
+        const spatialRelevance = parseFloat(storyForm.spatial_relevance_m);
+        if (!isNaN(spatialRelevance)) {
+          if (spatialRelevance <= 100) {
+            spatialAccuracy = 'exact';
+          } else if (spatialRelevance <= 1000) {
+            spatialAccuracy = 'approximate';
+          }
+        }
 
-      setLDataSaved(true);
-      toast.success('L Factor data saved successfully!');
+        // Prepare data for API submission
+        const submissionData = {
+          // Location data
+          location_name: locationName,
+          latitude: mapLocation.lat,
+          longitude: mapLocation.lng,
+          location_description: storyForm.location_description || `L Factor story collected on ${new Date().toLocaleDateString()}`,
+          region: '',
+
+          // L Factor story data
+          title: storyForm.title,
+          story: storyForm.story_text,
+          location_place: storyForm.location_description || locationName,
+          years_ago: storyForm.recency_years ? parseInt(storyForm.recency_years) : undefined,
+          source_type: storyForm.credibility,  // Send credibility string as source_type (instrumented, eyewitness, expert, newspaper, oral-tradition)
+          credibility: storyForm.credibility,   // Also send as credibility for backend to convert to credibility_confidence
+          spatial_accuracy: spatialAccuracy,
+        };
+
+        // Submit to database via API
+        const response = await lFactorAPI.submitStory(submissionData);
+
+        // Save to localStorage for persistence
+        localStorage.setItem('georiskmod_l_data', JSON.stringify(storyForm));
+        localStorage.setItem('georiskmod_l_data_saved', 'true');
+
+        setLDataSaved(true);
+        toast.success(`L Factor story saved to database! Lore ID: ${response.lore_id}`);
+      } else {
+        // For discover and observation scenarios, just mark as saved
+        // These scenarios handle their own database submissions through AI APIs
+        localStorage.setItem('georiskmod_l_data_saved', 'true');
+        setLDataSaved(true);
+        toast.success('L Factor data marked as saved!');
+      }
 
     } catch (error: any) {
       console.error('L Factor submit error:', error);
-      toast.error('Failed to save L Factor data');
+      toast.error(`Failed to save L Factor data: ${error.message || 'Unknown error'}`);
     } finally {
       setIsSubmittingL(false);
     }
@@ -1933,25 +1838,17 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   };
 
   // Render completeness indicator
-
-  // Render completeness indicator (defensive)
-  const renderCompleteness = (completed: number = 0, total: number = 0) => {
-    const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
-    const safeCompleted = Math.max(0, Math.min(Math.floor(Number(completed) || 0), safeTotal));
-
-    const circles = Array.from({ length: safeTotal }, (_, i) => (
-      <div
-        key={i}
-        aria-hidden
-        className={`w-4 h-4 rounded-full ${i < safeCompleted ? 'bg-green-500' : 'bg-gray-600'}`}
-      />
-    ));
-
-    return (
-      <div className="flex gap-1" aria-label={`Completeness: ${safeCompleted} of ${safeTotal}`}>
-        {circles}
-      </div>
-    );
+  const renderCompleteness = (completed: number, total: number) => {
+    const circles = [];
+    for (let i = 0; i < total; i++) {
+      circles.push(
+        <div
+          key={i}
+          className={`w-4 h-4 rounded-full ${i < completed ? 'bg-green-500' : 'bg-gray-600'}`}
+        />
+      );
+    }
+    return <div className="flex gap-1">{circles}</div>;
   };
 
   // Render quality indicator
@@ -2085,7 +1982,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const renderVFactorForm = () => {
     return (
       <Card className="p-6">
-             <div className="space-y-6">
+        <div className="space-y-6">
           <div>
             <Label className="text-gray-900 mb-2 block">Exposure Score (0-1)</Label>
             <Input
@@ -2585,7 +2482,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                   </Button>
                 </div>
 
-                    {/* Scenario 1: Submit Story/Lore */}
+                    {/* Scenario 1: Submit Story */}
                     {loreScenario === 'story' && (
                       <Card className="bg-white border-gray-200 p-6">
                         <div className="mb-4">
@@ -2619,7 +2516,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                           </div>
 
                           <div>
-                            <Label htmlFor="story-location" className="text-gray-900 mb-2 block">Location Context (Optional)</Label>
+                            <Label htmlFor="story-location" className="text-gray-900 mb-2 block">Location</Label>
                             <Input
                               id="story-location"
                               placeholder="e.g., Near Eagle Creek, Mt. Hood area"
@@ -2627,22 +2524,52 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                               onChange={(e) => setStoryForm({...storyForm, location_description: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
                             />
-                            <p className="text-xs text-gray-700 mt-1">Additional location context to help AI extract spatial information</p>
                           </div>
 
-                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                            <div className="flex items-start gap-2">
-                              <Sparkles className="h-5 w-5 text-blue-600 mt-0.5" />
-                              <div>
-                                <h5 className="font-semibold text-blue-900 mb-1">AI Will Extract Automatically:</h5>
-                                <ul className="text-sm text-blue-800 space-y-1">
-                                  <li>• <strong>Recency</strong> - When the event occurred (years ago)</li>
-                                  <li>• <strong>Credibility</strong> - Source reliability (oral tradition, historical, scientific)</li>
-                                  <li>• <strong>Spatial Information</strong> - Location details and precision</li>
-                                  <li>• <strong>Event Type</strong> - Type of mass movement (landslide, debris flow, etc.)</li>
-                                </ul>
-                              </div>
-                            </div>
+                          <div>
+                            <Label htmlFor="story-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
+                            <Input
+                              id="story-recency"
+                              type="number"
+                              placeholder="e.g., 50"
+                              value={storyForm.recency_years}
+                              onChange={(e) => setStoryForm({...storyForm, recency_years: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="story-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
+                            <Select
+                              value={storyForm.credibility}
+                              onValueChange={(value) => setStoryForm({...storyForm, credibility: value})}
+                            >
+                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
+                                <SelectValue placeholder="Select source type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="instrumented">Instrumented = 0.95</SelectItem>
+                                <SelectItem value="eyewitness">Eyewitness = 0.85</SelectItem>
+                                <SelectItem value="expert">Expert = 0.75</SelectItem>
+                                <SelectItem value="newspaper">Newspaper = 0.60</SelectItem>
+                                <SelectItem value="oral-tradition">Oral-Tradition = 0.45</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-700 mt-1">Source type and reliability. Higher values indicate more reliable sources.</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="story-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
+                            <Input
+                              id="story-spatial"
+                              type="number"
+                              placeholder="e.g., 100"
+                              value={storyForm.spatial_relevance_m}
+                              onChange={(e) => setStoryForm({...storyForm, spatial_relevance_m: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
                           <div className="flex gap-4">
@@ -2706,23 +2633,51 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                               onChange={(e) => setDiscoverForm({...discoverForm, location_radius_m: parseInt(e.target.value)})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
                             />
-                            <p className="text-xs text-gray-700 mt-1">How far to search for historical lore (default: 10 km)</p>
+                            <p className="text-xs text-gray-700 mt-1">Default: 10,000 meters (10 km)</p>
                           </div>
 
-                          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-                            <div className="flex items-start gap-2">
-                              <Sparkles className="h-5 w-5 text-green-600 mt-0.5" />
-                              <div>
-                                <h5 className="font-semibold text-green-900 mb-1">AI Research Agent Will:</h5>
-                                <ul className="text-sm text-green-800 space-y-1">
-                                  <li>• Search historical databases for past events</li>
-                                  <li>• Review news archives and reports</li>
-                                  <li>• Check indigenous knowledge repositories</li>
-                                  <li>• Extract recency, credibility, and spatial data automatically</li>
-                                  <li>• Save all discovered lore to the database</li>
-                                </ul>
-                              </div>
-                            </div>
+                          <div>
+                            <Label htmlFor="discover-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
+                            <Input
+                              id="discover-recency"
+                              type="number"
+                              placeholder="e.g., 50"
+                              value={discoverForm.recency_years}
+                              onChange={(e) => setDiscoverForm({...discoverForm, recency_years: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
+                            <Select
+                              value={discoverForm.credibility}
+                              onValueChange={(value) => setDiscoverForm({...discoverForm, credibility: value})}
+                            >
+                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
+                                <SelectValue placeholder="Select source type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
+                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
+                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
+                            <Input
+                              id="discover-spatial"
+                              type="number"
+                              placeholder="e.g., 100"
+                              value={discoverForm.spatial_relevance_m}
+                              onChange={(e) => setDiscoverForm({...discoverForm, spatial_relevance_m: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
                           <div className="flex flex-col gap-4">
@@ -3111,7 +3066,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
                       <div className="flex items-center gap-2 text-white">
                         <Users className="h-4 w-4" />
-                        <span>By: {version.uploadedBy || 'Current User'}</span>
+                        <span>By: {version.uploadedBy || 'Unknown'}</span>
                       </div>
 
                       {version.changes && (

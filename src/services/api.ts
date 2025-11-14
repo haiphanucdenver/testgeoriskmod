@@ -167,7 +167,8 @@ export interface LFactorStoryData {
   story: string;  // Maps to lore_narrative
   location_place: string;  // Maps to place_name
   years_ago?: number;  // Recency in years ago (saved directly to years_ago column)
-  credibility: string;  // eyewitness, instrumented, oral-tradition, newspaper, expert
+  source_type: string;  // instrumented, eyewitness, expert, newspaper, oral-tradition → source_type column
+  credibility: string;  // instrumented, eyewitness, expert, newspaper, oral-tradition → credibility_confidence (converted by backend)
   spatial_accuracy: string;  // exact, approximate, general-area
 }
 
@@ -515,11 +516,10 @@ export const loreAPI = {
    */
   submitStory: (data: SubmitStoryRequest) =>
     fetchAPI<{
-      lore_id: number;
-      location_id: number;
+      story_id: number;
+      job_id: number;
       message: string;
       ai_status: string;
-      l_score: number;
       ai_results?: any;
     }>('/api/lore/submit-story', {
       method: 'POST',
@@ -532,8 +532,7 @@ export const loreAPI = {
   discoverAtLocation: (data: DiscoverLoreRequest) =>
     fetchAPI<{
       message: string;
-      lore_ids: number[];
-      location_id: number;
+      story_ids: number[];
       location: { latitude: number; longitude: number; radius_m: number };
       ai_results: any;
     }>('/api/lore/discover-at-location', {
