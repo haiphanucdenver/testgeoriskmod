@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List
 import os
@@ -10,10 +11,28 @@ from datetime import datetime
 import hashlib
 from pathlib import Path
 import numpy as np
+import json
+
+# AI Agent imports
+from ai_agents.models import (
+    ExtractionRequest,
+    ResearchQuery,
+    LocalLoreExtraction,
+    ResearchResult,
+    HazardType
+)
+from ai_agents.extraction_agent import DocumentExtractionAgent
+from ai_agents.research_agent import DeepResearchAgent
+from ai_agents.file_processor import FileProcessor
+from ai_agents.config import Config as AIConfig
 
 load_dotenv()
 
-app = FastAPI(title="GEORISKMOD API", version="1.0.0")
+app = FastAPI(
+    title="GEORISKMOD API with AI Agents",
+    description="Unified API for geospatial risk modeling with AI-powered extraction and research agents",
+    version="1.0.0"
+)
 
 # Enable CORS for frontend connection
 app.add_middleware(
@@ -32,6 +51,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize AI agents
+extraction_agent = DocumentExtractionAgent()
+research_agent = DeepResearchAgent()
+file_processor = FileProcessor()
+
+# Create upload directory for AI agents
+os.makedirs(AIConfig.UPLOAD_DIR, exist_ok=True)
 
 # Database connection function
 def get_conn():
@@ -134,7 +161,7 @@ class VFactorSubmit(BaseModel):
 @app.get("/")
 def read_root():
     return {
-        "message": "GEORISKMOD API is running",
+        "message": "GEORISKMOD API with AI Agents is running",
         "version": "1.0.0",
         "endpoints": {
             "health": "/api/health",
@@ -147,6 +174,12 @@ def read_root():
             "data_sources": "/api/data-sources",
             "file_upload": "/api/upload",
             "statistics": "/api/statistics",
+            "ai_extract_text": "/api/ai/extract/text",
+            "ai_extract_file": "/api/ai/extract/file",
+            "ai_research": "/api/ai/research",
+            "ai_research_batch": "/api/ai/research/batch",
+            "ai_supported_formats": "/api/ai/supported-formats",
+            "ai_config": "/api/ai/config",
             "docs": "/docs"
         }
     }
@@ -164,10 +197,194 @@ def health_check():
         return {
             "status": "healthy",
             "database": "connected",
-            "timestamp": str(result[0]) if result else None
+            "timestamp": str(result[0]) if result else None,
+            "ai_agents": {
+                "openai_configured": bool(AIConfig.OPENAI_API_KEY),
+                "extraction_model": AIConfig.OPENAI_MODEL,
+                "research_model": AIConfig.OPENAI_RESEARCH_MODEL
+            }
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+# ===== AI AGENT ENDPOINTS =====
+
+@app.post("/api/ai/extract/text", response_model=List[LocalLoreExtraction])
+async def ai_extract_from_text(request: ExtractionRequest):
+    """
+    Extract Local Lore data from raw text using AI.
+
+    **Request Body:**
+    - `text`: Text content to analyze
+    - `location_context`: Optional location context
+    - `current_date`: Optional current date for calculations
+
+    **Returns:** List of extracted LocalLoreExtraction objects with calculated scores
+    """
+    try:
+        if not request.text:
+            raise HTTPException(status_code=400, detail="No text provided")
+
+        results = await extraction_agent.extract_from_text(request)
+        return results
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+@app.post("/api/ai/extract/file", response_model=List[LocalLoreExtraction])
+async def ai_extract_from_file(
+    file: UploadFile = File(...),
+    location_context: Optional[str] = Form(None)
+):
+    """
+    Extract Local Lore data from an uploaded document using AI.
+
+    **Supported formats:** PDF, DOCX, TXT, MD
+
+    **Form Data:**
+    - `file`: Document file to process
+    - `location_context`: Optional location context
+
+    **Returns:** List of extracted LocalLoreExtraction objects with calculated scores
+    """
+    try:
+        # Save uploaded file
+        file_content = await file.read()
+        file_path = os.path.join(AIConfig.UPLOAD_DIR, file.filename)
+
+        with open(file_path, 'wb') as f:
+            f.write(file_content)
+
+        # Get file info
+        file_info = file_processor.get_file_info(file_path)
+
+        if not file_info["is_supported"]:
+            os.remove(file_path)  # Clean up
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type: {file_info['extension']}. "
+                       f"Supported: {', '.join(FileProcessor.SUPPORTED_EXTENSIONS)}"
+            )
+
+        # Check file size
+        if file_info["size_bytes"] > AIConfig.MAX_FILE_SIZE:
+            os.remove(file_path)
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Max size: {AIConfig.MAX_FILE_SIZE / (1024*1024)}MB"
+            )
+
+        # Extract text
+        text = file_processor.extract_text(file_path)
+
+        # Create extraction request
+        request = ExtractionRequest(
+            text=text,
+            location_context=location_context,
+            current_date=datetime.now()
+        )
+
+        # Extract lore data
+        results = await extraction_agent.extract_from_text(request)
+
+        # Clean up file (optional - you might want to keep for audit)
+        # os.remove(file_path)
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"File processing failed: {str(e)}")
+
+@app.post("/api/ai/research", response_model=ResearchResult)
+async def ai_conduct_research(query: ResearchQuery):
+    """
+    Conduct deep research about a location's mass movement history using AI.
+
+    **Request Body:**
+    - `location`: Location to research (required)
+    - `hazard_type`: Specific hazard type to focus on (optional)
+    - `time_range_years`: Years of history to search (default: 50)
+    - `include_indigenous_knowledge`: Include indigenous/local knowledge (default: true)
+    - `max_sources`: Maximum number of sources to find (default: 10)
+
+    **Returns:** ResearchResult with comprehensive findings
+    """
+    try:
+        if not query.location:
+            raise HTTPException(status_code=400, detail="Location is required")
+
+        result = await research_agent.conduct_research(query)
+        return result
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Research failed: {str(e)}")
+
+@app.post("/api/ai/research/batch")
+async def ai_batch_research(
+    locations: List[str],
+    hazard_type: Optional[HazardType] = None,
+    time_range_years: int = 50
+):
+    """
+    Conduct AI research on multiple locations.
+
+    **Request Body:**
+    - `locations`: List of location names
+    - `hazard_type`: Optional hazard type focus
+    - `time_range_years`: Years of history to search
+
+    **Returns:** Dictionary mapping locations to results
+    """
+    try:
+        if not locations:
+            raise HTTPException(status_code=400, detail="No locations provided")
+
+        if len(locations) > 10:
+            raise HTTPException(status_code=400, detail="Maximum 10 locations per batch")
+
+        results = {}
+        for location in locations:
+            query = ResearchQuery(
+                location=location,
+                hazard_type=hazard_type,
+                time_range_years=time_range_years
+            )
+
+            try:
+                result = await research_agent.conduct_research(query)
+                results[location] = result
+            except Exception as e:
+                results[location] = {"error": str(e)}
+
+        return results
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Batch research failed: {str(e)}")
+
+@app.get("/api/ai/supported-formats")
+async def ai_get_supported_formats():
+    """Get list of supported file formats for AI processing"""
+    return {
+        "supported_extensions": list(FileProcessor.SUPPORTED_EXTENSIONS),
+        "max_file_size_mb": AIConfig.MAX_FILE_SIZE / (1024 * 1024)
+    }
+
+@app.get("/api/ai/config")
+async def ai_get_config():
+    """Get current AI configuration (non-sensitive)"""
+    return {
+        "lore_weights": AIConfig.LORE_WEIGHTS,
+        "source_credibility": AIConfig.SOURCE_CREDIBILITY,
+        "hazard_types": AIConfig.HAZARD_TYPES,
+        "models": {
+            "extraction": AIConfig.OPENAI_MODEL,
+            "research": AIConfig.OPENAI_RESEARCH_MODEL
+        }
+    }
 
 # ===== LOCATION ENDPOINTS =====
 
@@ -2000,10 +2217,34 @@ def get_statistics():
     finally:
         conn.close()
 
+# ===== GLOBAL EXCEPTION HANDLER =====
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """Global exception handler for all unhandled errors"""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "detail": str(exc),
+            "type": type(exc).__name__
+        }
+    )
+
 if __name__ == "__main__":
     import uvicorn
-    print("🚀 Starting GEORISKMOD API Server...")
-    print("📚 API Documentation: http://localhost:8001/docs")
-    print("🏥 Health Check: http://localhost:8001/api/health")
-    print("⚠️  Note: Using port 8001 (port 8000 is used by AI agents backend)")
+
+    print("="*80)
+    print("🚀 Starting GEORISKMOD API Server with AI Agents")
+    print("="*80)
+    print(f"📍 Server: http://localhost:8001")
+    print(f"📚 API Docs: http://localhost:8001/docs")
+    print(f"🏥 Health Check: http://localhost:8001/api/health")
+    print(f"")
+    print(f"🤖 AI Agents Enabled:")
+    print(f"   - Extraction Model: {AIConfig.OPENAI_MODEL}")
+    print(f"   - Research Model: {AIConfig.OPENAI_RESEARCH_MODEL}")
+    print(f"   - OpenAI Configured: {bool(AIConfig.OPENAI_API_KEY)}")
+    print("="*80)
+
     uvicorn.run(app, host="0.0.0.0", port=8001)
