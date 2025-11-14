@@ -1099,6 +1099,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
         // Expanded candidate list - covers common variants, API versioning and ai wrappers.
         const candidates = [
+          // Correct endpoint (should be tried first)
+          `${baseRoot}/api/lore/submit-story`,
+
           // common "API" prefixes
           `${baseRoot}/api/lore/submit`,
           `${baseRoot}/lore/submit`,
