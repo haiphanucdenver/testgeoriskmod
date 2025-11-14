@@ -515,10 +515,11 @@ export const loreAPI = {
    */
   submitStory: (data: SubmitStoryRequest) =>
     fetchAPI<{
-      story_id: number;
-      job_id: number;
+      lore_id: number;
+      location_id: number;
       message: string;
       ai_status: string;
+      l_score: number;
       ai_results?: any;
     }>('/api/lore/submit-story', {
       method: 'POST',
@@ -531,7 +532,8 @@ export const loreAPI = {
   discoverAtLocation: (data: DiscoverLoreRequest) =>
     fetchAPI<{
       message: string;
-      story_ids: number[];
+      lore_ids: number[];
+      location_id: number;
       location: { latitude: number; longitude: number; radius_m: number };
       ai_results: any;
     }>('/api/lore/discover-at-location', {
