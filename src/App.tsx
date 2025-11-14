@@ -32,10 +32,10 @@ export default function App() {
   // Search location state
   const [searchLocation, setSearchLocation] = useState<string>("");
 
-  // Current map location state
+  // Current map location state - Nevado del Ruiz volcanic mountain, Colombia
   const [mapLocation, setMapLocation] = useState({
-    lat: 45.3,
-    lng: -122.7,
+    lat: 4.8925,
+    lng: -75.3222,
     zoom: 10
   });
 
@@ -143,7 +143,7 @@ export default function App() {
               onVertexSelect={handleVertexSelect}
               riskData={riskData}
             />
-            <RightSidebar />
+            <RightSidebar riskData={riskData} />
           </>
         );
     }

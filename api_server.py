@@ -24,6 +24,9 @@ app.add_middleware(
         "http://localhost:3005",  # Vite alternative port
         "http://127.0.0.1:5173",  # Localhost alternative
         "http://127.0.0.1:3005",  # Localhost alternative
+        "http://100.26.170.156",  # LightSail Apache (port 80)
+        "http://100.26.170.156:8001",  # LightSail API
+        "*",  # Allow all origins for development
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -62,25 +65,6 @@ class EventCreate(BaseModel):
     hazard_type: str
     date_observed: str
 
-class VulnerabilityCreate(BaseModel):
-    location_id: int
-    asset_type: str
-    num_buildings: int
-
-class LocalLoreCreate(BaseModel):
-    location_id: int
-    lore_narrative: str
-
-class HistoricalEventCreate(BaseModel):
-    location_id: Optional[int] = None
-    eventType: str
-    date: str
-    location: str
-    description: str
-    source: str
-    credibility: str
-    spatialAccuracy: str
-
 class RiskCreate(BaseModel):
     location_id: int
     title: str
@@ -91,6 +75,59 @@ class RiskCreate(BaseModel):
     event_id: int
     vulnerability_id: int
     lore_id: int
+
+class HFactorSubmit(BaseModel):
+    # Location data
+    location_name: str
+    latitude: float
+    longitude: float
+    location_description: Optional[str] = None
+    region: Optional[str] = None
+
+    # Event data
+    hazard_type: str = "landslide"
+    date_observed: str
+
+    # H Factor - Terrain data (for event table)
+    slope_angle: Optional[float] = None
+    curvature_number: Optional[float] = None
+    lithology_type: Optional[str] = None
+    lithology_level: Optional[int] = None
+
+    # H Factor - Rainfall data (for dynamic_trigger table)
+    rainfall_intensity_mm_hr: Optional[float] = None
+    rainfall_duration_hrs: Optional[float] = None
+    rainfall_exceedance: Optional[float] = None
+
+class LFactorStorySubmit(BaseModel):
+    # Location data
+    location_name: str
+    latitude: float
+    longitude: float
+    location_description: Optional[str] = None
+    region: Optional[str] = None
+
+    # L Factor - Story data (for local_lore table)
+    title: str  # Maps to source_title
+    story: str  # Maps to lore_narrative
+    location_place: str  # Maps to place_name
+    years_ago: Optional[int] = None  # Recency in years ago (saved directly to years_ago column)
+    credibility: str  # eyewitness, instrumented, oral-tradition, newspaper, expert → credibility_confidence
+    spatial_accuracy: str  # exact, approximate, general-area → distance_to_report_location
+
+class VFactorSubmit(BaseModel):
+    # Location data
+    location_name: str
+    latitude: float
+    longitude: float
+    location_description: Optional[str] = None
+    region: Optional[str] = None
+
+    # V Factor - Vulnerability data (for vulnerability table)
+    exposure_score: float  # 0-1
+    fragility_score: float  # 0-1
+    criticality_score: Optional[float] = None  # 0-1
+    population_density: Optional[float] = None  # people/km²
 
 # Root endpoint
 @app.get("/")
@@ -236,9 +273,9 @@ def get_all_events():
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT e.*, l.name as location_name, l.latitude, l.longitude 
-                FROM event e 
-                JOIN location l ON e.location_id = l.location_id 
+                SELECT e.*, l.name as location_name, l.latitude, l.longitude
+                FROM event e
+                JOIN location l ON e.location_id = l.location_id
                 ORDER BY e.date_observed DESC
             """)
             events = cur.fetchall()
@@ -249,269 +286,432 @@ def get_all_events():
     finally:
         conn.close()
 
-# ===== VULNERABILITY ENDPOINTS =====
+@app.post("/api/h-factor")
+def submit_h_factor_data(data: HFactorSubmit):
+    """
+    Submit H Factor data to the database
 
-@app.post("/api/vulnerabilities")
-def create_vulnerability(vuln: VulnerabilityCreate):
-    """Create a new vulnerability record"""
-    conn = get_conn()
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO vulnerability (location_id, asset_type, num_buildings) VALUES (%s, %s, %s) RETURNING vulnerability_id;",
-                (vuln.location_id, vuln.asset_type, vuln.num_buildings)
-            )
-            vuln_id = cur.fetchone()[0]
-            conn.commit()
-            return {
-                "vulnerability_id": vuln_id,
-                "message": "Vulnerability record created successfully"
-            }
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.get("/api/vulnerabilities")
-def get_all_vulnerabilities():
-    """Get all vulnerability records"""
+    This endpoint:
+    1. Creates/updates a location record
+    2. Creates an event record with terrain data (slope, curvature, lithology)
+    3. Creates a dynamic_trigger record with rainfall data
+    4. Returns the created IDs for reference
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Step 1: Create or get location
             cur.execute("""
-                SELECT v.*, l.name as location_name 
-                FROM vulnerability v 
-                JOIN location l ON v.location_id = l.location_id 
-                ORDER BY v.vulnerability_id
-            """)
-            vulnerabilities = cur.fetchall()
+                INSERT INTO location (name, latitude, longitude, description, region)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (name, latitude, longitude)
+                DO UPDATE SET description = EXCLUDED.description, region = EXCLUDED.region
+                RETURNING location_id
+            """, (
+                data.location_name,
+                data.latitude,
+                data.longitude,
+                data.location_description,
+                data.region
+            ))
+            location_id = cur.fetchone()['location_id']
+
+            # Step 2: Create event record with H factor terrain data
+            cur.execute("""
+                INSERT INTO event (
+                    location_id, date_observed, hazard_type,
+                    slope_angle, curvature_number,
+                    lithology_type, lithology_level
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING event_id
+            """, (
+                location_id,
+                data.date_observed,
+                data.hazard_type,
+                data.slope_angle,
+                data.curvature_number,
+                data.lithology_type,
+                data.lithology_level
+            ))
+            event_id = cur.fetchone()['event_id']
+
+            # Step 3: Create dynamic_trigger record with rainfall data
+            trigger_id = None
+            if any([data.rainfall_intensity_mm_hr, data.rainfall_duration_hrs, data.rainfall_exceedance]):
+                cur.execute("""
+                    INSERT INTO dynamic_trigger (
+                        event_id,
+                        rainfall_intensity_mm_hr,
+                        rainfall_duration_hrs,
+                        rainfall_exceedance
+                    )
+                    VALUES (%s, %s, %s, %s)
+                    RETURNING trigger_id
+                """, (
+                    event_id,
+                    data.rainfall_intensity_mm_hr,
+                    data.rainfall_duration_hrs,
+                    data.rainfall_exceedance
+                ))
+                trigger_id = cur.fetchone()['trigger_id']
+
+            conn.commit()
+
             return {
-                "count": len(vulnerabilities),
-                "vulnerabilities": vulnerabilities
+                "success": True,
+                "message": "H Factor data saved successfully",
+                "location_id": location_id,
+                "event_id": event_id,
+                "trigger_id": trigger_id
             }
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to save H Factor data: {str(e)}")
     finally:
         conn.close()
 
-# ===== LOCAL LORE ENDPOINTS =====
+@app.post("/api/l-factor-story")
+def submit_l_factor_story(data: LFactorStorySubmit):
+    """
+    Submit L Factor story data to the database
 
-@app.post("/api/local-lore")
-def create_local_lore(lore: LocalLoreCreate):
-    """Create a new local lore record"""
+    This endpoint:
+    1. Creates/updates a location record
+    2. Creates a local_lore record with story data
+    3. Converts credibility to confidence score (0-1)
+    4. Converts spatial accuracy to estimated distance
+    5. Uses years_ago directly from user input
+    """
     conn = get_conn()
     try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO local_lore (location_id, lore_narrative) VALUES (%s, %s) RETURNING lore_id;",
-                (lore.location_id, lore.lore_narrative)
-            )
-            lore_id = cur.fetchone()[0]
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Step 1: Create or get location
+            cur.execute("""
+                INSERT INTO location (name, latitude, longitude, description, region)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (name, latitude, longitude)
+                DO UPDATE SET description = EXCLUDED.description, region = EXCLUDED.region
+                RETURNING location_id
+            """, (
+                data.location_name,
+                data.latitude,
+                data.longitude,
+                data.location_description,
+                data.region
+            ))
+            location_id = cur.fetchone()['location_id']
+
+            # Step 2: Convert credibility to confidence score (0-1)
+            credibility_map = {
+                'instrumented': 0.95,  # High confidence - measured data
+                'eyewitness': 0.85,    # High confidence - direct observation
+                'expert': 0.75,         # Good confidence - expert analysis
+                'newspaper': 0.60,      # Medium confidence - media report
+                'oral-tradition': 0.45  # Lower confidence - passed down stories
+            }
+            credibility_confidence = credibility_map.get(data.credibility, 0.50)
+
+            # Step 3: Convert spatial accuracy to estimated distance (km)
+            spatial_distance_map = {
+                'exact': 0.1,        # Within 100m
+                'approximate': 5.0,  # Within 5km
+                'general-area': 20.0 # Within 20km
+            }
+            distance_to_report_location = spatial_distance_map.get(data.spatial_accuracy, 10.0)
+
+            # Step 4: Use years_ago directly from user input
+            years_ago = data.years_ago
+
+            # Step 5: Create local_lore record with mapped fields
+            cur.execute("""
+                INSERT INTO local_lore (
+                    location_id,
+                    source_title,
+                    lore_narrative,
+                    place_name,
+                    years_ago,
+                    credibility_confidence,
+                    distance_to_report_location
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING lore_id
+            """, (
+                location_id,
+                data.title,
+                data.story,
+                data.location_place,
+                years_ago,
+                credibility_confidence,
+                distance_to_report_location
+            ))
+            lore_id = cur.fetchone()['lore_id']
+
             conn.commit()
+
             return {
+                "success": True,
+                "message": "L Factor story saved successfully",
+                "location_id": location_id,
                 "lore_id": lore_id,
-                "message": "Local lore record created successfully"
+                "years_ago": years_ago,
+                "credibility_confidence": credibility_confidence,
+                "distance_to_report_location": distance_to_report_location
             }
+
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to save L Factor story: {str(e)}")
     finally:
         conn.close()
 
-@app.get("/api/local-lore")
-def get_all_local_lore():
-    """Get all local lore records"""
+@app.get("/api/l-factor-stories")
+def get_all_l_factor_stories():
+    """
+    Get all L Factor stories from local_lore table
+
+    Returns stories with proper column mapping for frontend display
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("""
-                SELECT ll.*, l.name as location_name 
-                FROM local_lore ll 
-                JOIN location l ON ll.location_id = l.location_id 
-                ORDER BY ll.lore_id DESC
+                SELECT
+                    ll.lore_id,
+                    ll.location_id,
+                    ll.source_title as title,
+                    ll.lore_narrative as story,
+                    ll.place_name as location_place,
+                    ll.years_ago,
+                    ll.credibility_confidence,
+                    ll.distance_to_report_location,
+                    ll.created_at,
+                    l.name as location_name,
+                    l.latitude,
+                    l.longitude
+                FROM local_lore ll
+                JOIN location l ON ll.location_id = l.location_id
+                ORDER BY ll.created_at DESC
             """)
-            lore = cur.fetchall()
+            stories = cur.fetchall()
+
+            # Convert to format expected by frontend
+            formatted_stories = []
+            for story in stories:
+                # Reverse map credibility_confidence to credibility string
+                credibility = 'newspaper'  # default
+                conf = story['credibility_confidence']
+                if conf and conf >= 0.90:
+                    credibility = 'instrumented'
+                elif conf and conf >= 0.80:
+                    credibility = 'eyewitness'
+                elif conf and conf >= 0.70:
+                    credibility = 'expert'
+                elif conf and conf >= 0.50:
+                    credibility = 'newspaper'
+                else:
+                    credibility = 'oral-tradition'
+
+                # Reverse map distance to spatial accuracy
+                spatial_accuracy = 'approximate'  # default
+                dist = story['distance_to_report_location']
+                if dist and dist <= 0.5:
+                    spatial_accuracy = 'exact'
+                elif dist and dist <= 10:
+                    spatial_accuracy = 'approximate'
+                else:
+                    spatial_accuracy = 'general-area'
+
+                formatted_stories.append({
+                    'id': str(story['lore_id']),
+                    'eventType': story['title'] or 'Historical Event',
+                    'recency': story['years_ago'] or 0,  # Return years_ago directly
+                    'location': story['location_place'] or '',
+                    'description': story['story'] or '',
+                    'source': '',  # Not stored in local_lore
+                    'credibility': credibility,
+                    'spatialAccuracy': spatial_accuracy,
+                    'created_at': story['created_at'].isoformat() if story['created_at'] else None
+                })
+
             return {
-                "count": len(lore),
-                "lore": lore
+                "count": len(formatted_stories),
+                "events": formatted_stories
             }
     finally:
         conn.close()
 
-# ===== HISTORICAL EVENTS ENDPOINTS (Structured) =====
-
-@app.post("/api/historical-events")
-def create_historical_event(event: HistoricalEventCreate):
-    """Create a new historical event (stored in local_lore with structured format)"""
-    conn = get_conn()
-    try:
-        # Format the event data as a structured JSON string
-        import json
-        event_data = {
-            "type": event.eventType,
-            "date": event.date,
-            "location": event.location,
-            "description": event.description,
-            "source": event.source,
-            "credibility": event.credibility,
-            "spatialAccuracy": event.spatialAccuracy,
-            "created_at": datetime.now().isoformat()
-        }
-        
-        lore_narrative = json.dumps(event_data)
-        
-        # Use provided location_id or default to 1
-        location_id = event.location_id if event.location_id else 1
-        
-        with conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO local_lore (location_id, lore_narrative) VALUES (%s, %s) RETURNING lore_id;",
-                (location_id, lore_narrative)
-            )
-            lore_id = cur.fetchone()[0]
-            conn.commit()
-            return {
-                "id": lore_id,
-                "message": "Historical event created successfully",
-                "data": event_data
-            }
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
-    finally:
-        conn.close()
-
-@app.get("/api/historical-events")
-def get_historical_events():
-    """Get all historical events"""
-    conn = get_conn()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Check if table exists and has data
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = 'local_lore'
-                );
-            """)
-            table_exists = cur.fetchone()['exists']
-            
-            if not table_exists:
-                return {
-                    "count": 0,
-                    "events": []
-                }
-            
-            cur.execute("""
-                SELECT lore_id as id, location_id, lore_narrative, created_at 
-                FROM local_lore 
-                ORDER BY created_at DESC
-            """)
-            events = cur.fetchall()
-            
-            # Parse JSON data from lore_narrative
-            import json
-            parsed_events = []
-            for event in events:
-                try:
-                    # Try to parse as JSON first
-                    event_data = json.loads(event['lore_narrative'])
-                    parsed_events.append({
-                        "id": str(event['id']),
-                        "location_id": event['location_id'],
-                        "eventType": event_data.get('type', 'Unknown'),
-                        "date": event_data.get('date', ''),
-                        "location": event_data.get('location', ''),
-                        "description": event_data.get('description', ''),
-                        "source": event_data.get('source', ''),
-                        "credibility": event_data.get('credibility', 'newspaper'),
-                        "spatialAccuracy": event_data.get('spatialAccuracy', 'approximate'),
-                        "created_at": event['created_at'].isoformat() if event['created_at'] else None
-                    })
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    # If not JSON format, treat as plain text (legacy format)
-                    parsed_events.append({
-                        "id": str(event['id']),
-                        "location_id": event['location_id'],
-                        "eventType": "Historical Event",
-                        "date": "",
-                        "location": "",
-                        "description": str(event['lore_narrative']) if event['lore_narrative'] else "No description",
-                        "source": "",
-                        "credibility": "newspaper",
-                        "spatialAccuracy": "approximate",
-                        "created_at": event['created_at'].isoformat() if event['created_at'] else None
-                    })
-            
-            return {
-                "count": len(parsed_events),
-                "events": parsed_events
-            }
-    except Exception as e:
-        # Log the error but return empty list instead of crashing
-        print(f"Error fetching historical events: {e}")
-        return {
-            "count": 0,
-            "events": []
-        }
-    finally:
-        conn.close()
-
-@app.delete("/api/historical-events/{event_id}")
-def delete_historical_event(event_id: int):
-    """Delete a historical event"""
+@app.delete("/api/l-factor-stories/{lore_id}")
+def delete_l_factor_story(lore_id: int):
+    """
+    Delete a L Factor story from local_lore table
+    """
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute("DELETE FROM local_lore WHERE lore_id = %s", (event_id,))
+            cur.execute("DELETE FROM local_lore WHERE lore_id = %s", (lore_id,))
             if cur.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Historical event not found")
+                raise HTTPException(status_code=404, detail="L Factor story not found")
             conn.commit()
-            return {"message": "Historical event deleted successfully"}
+            return {"message": "L Factor story deleted successfully"}
     except HTTPException:
         raise
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to delete L Factor story: {str(e)}")
     finally:
         conn.close()
 
-@app.put("/api/historical-events/{event_id}")
-def update_historical_event(event_id: int, event: HistoricalEventCreate):
-    """Update a historical event"""
+@app.put("/api/l-factor-stories/{lore_id}")
+def update_l_factor_story(lore_id: int, data: LFactorStorySubmit):
+    """
+    Update a L Factor story in local_lore table
+
+    Updates location and all story fields with proper column mapping
+    """
     conn = get_conn()
     try:
-        import json
-        event_data = {
-            "type": event.eventType,
-            "date": event.date,
-            "location": event.location,
-            "description": event.description,
-            "source": event.source,
-            "credibility": event.credibility,
-            "spatialAccuracy": event.spatialAccuracy,
-            "updated_at": datetime.now().isoformat()
-        }
-        
-        lore_narrative = json.dumps(event_data)
-        
-        with conn.cursor() as cur:
-            cur.execute(
-                "UPDATE local_lore SET lore_narrative = %s WHERE lore_id = %s",
-                (lore_narrative, event_id)
-            )
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Step 1: Create or get location
+            cur.execute("""
+                INSERT INTO location (name, latitude, longitude, description, region)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (name, latitude, longitude)
+                DO UPDATE SET description = EXCLUDED.description, region = EXCLUDED.region
+                RETURNING location_id
+            """, (
+                data.location_name,
+                data.latitude,
+                data.longitude,
+                data.location_description,
+                data.region
+            ))
+            location_id = cur.fetchone()['location_id']
+
+            # Step 2: Convert credibility to confidence score (0-1)
+            credibility_map = {
+                'instrumented': 0.95,
+                'eyewitness': 0.85,
+                'expert': 0.75,
+                'newspaper': 0.60,
+                'oral-tradition': 0.45
+            }
+            credibility_confidence = credibility_map.get(data.credibility, 0.50)
+
+            # Step 3: Convert spatial accuracy to estimated distance (km)
+            spatial_distance_map = {
+                'exact': 0.1,
+                'approximate': 5.0,
+                'general-area': 20.0
+            }
+            distance_to_report_location = spatial_distance_map.get(data.spatial_accuracy, 10.0)
+
+            # Step 4: Use years_ago directly from user input
+            years_ago = data.years_ago
+
+            # Step 5: Update local_lore record
+            cur.execute("""
+                UPDATE local_lore
+                SET location_id = %s,
+                    source_title = %s,
+                    lore_narrative = %s,
+                    place_name = %s,
+                    years_ago = %s,
+                    credibility_confidence = %s,
+                    distance_to_report_location = %s
+                WHERE lore_id = %s
+            """, (
+                location_id,
+                data.title,
+                data.story,
+                data.location_place,
+                years_ago,
+                credibility_confidence,
+                distance_to_report_location,
+                lore_id
+            ))
+
             if cur.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Historical event not found")
+                raise HTTPException(status_code=404, detail="L Factor story not found")
+
             conn.commit()
+
             return {
-                "id": event_id,
-                "message": "Historical event updated successfully",
-                "data": event_data
+                "success": True,
+                "message": "L Factor story updated successfully",
+                "lore_id": lore_id,
+                "location_id": location_id
             }
     except HTTPException:
         raise
     except Exception as e:
         conn.rollback()
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=f"Failed to update L Factor story: {str(e)}")
+    finally:
+        conn.close()
+
+@app.post("/api/v-factor")
+def submit_v_factor_data(data: VFactorSubmit):
+    """
+    Submit V Factor data to the database
+
+    This endpoint:
+    1. Creates/updates a location record
+    2. Creates a vulnerability record with V factor data
+    3. Returns the created IDs for reference
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Step 1: Create or get location
+            cur.execute("""
+                INSERT INTO location (name, latitude, longitude, description, region)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (name, latitude, longitude)
+                DO UPDATE SET description = EXCLUDED.description, region = EXCLUDED.region
+                RETURNING location_id
+            """, (
+                data.location_name,
+                data.latitude,
+                data.longitude,
+                data.location_description,
+                data.region
+            ))
+            location_id = cur.fetchone()['location_id']
+
+            # Step 2: Create vulnerability record with V factor data
+            cur.execute("""
+                INSERT INTO vulnerability (
+                    location_id,
+                    exposure_score,
+                    fragility_score,
+                    criticality_score,
+                    population_density
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING vulnerability_id
+            """, (
+                location_id,
+                data.exposure_score,
+                data.fragility_score,
+                data.criticality_score,
+                data.population_density
+            ))
+            vulnerability_id = cur.fetchone()['vulnerability_id']
+
+            conn.commit()
+
+            return {
+                "success": True,
+                "message": "V Factor data saved successfully",
+                "location_id": location_id,
+                "vulnerability_id": vulnerability_id
+            }
+
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=400, detail=f"Failed to save V Factor data: {str(e)}")
     finally:
         conn.close()
 

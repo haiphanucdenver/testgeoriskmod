@@ -62,7 +62,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { historicalEventAPI, dataSourceAPI, loreAPI, getErrorMessage, checkAPIConnection } from "../services/api";
+import { dataSourceAPI, loreAPI, riskCalculationAPI, eventAPI, locationAPI, hFactorAPI, lFactorAPI, vFactorAPI, getErrorMessage, checkAPIConnection } from "../services/api";
 import type { DataSource } from "../services/api";
 import { toast } from "sonner";
 
@@ -97,18 +97,18 @@ interface DataItem {
   versions?: DataVersion[];
 }
 
-interface EventChange {
+interface LoreChangeLog {
   timestamp: Date;
   action: 'created' | 'edited' | 'deleted';
-  eventId: string;
+  loreEntryId: string;
   changes?: string;
-  previousData?: Partial<HistoricalEvent>;
+  previousData?: Partial<LocalLoreEntry>;
 }
 
-interface HistoricalEvent {
+interface LocalLoreEntry {
   id: string;
   eventType: string;
-  date: string;
+  recency: number;  // Years ago
   location: string;
   description: string;
   source: string;
@@ -126,14 +126,14 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   // API connection state
   const [isAPIConnected, setIsAPIConnected] = useState<boolean>(false);
   const [isCheckingAPI, setIsCheckingAPI] = useState<boolean>(true);
-  const [isLoadingEvents, setIsLoadingEvents] = useState<boolean>(false);
+  const [isLoadingLoreEntries, setIsLoadingLoreEntries] = useState<boolean>(false);
 
-  // Historical Events state
-  const [historicalEvents, setHistoricalEvents] = useState<HistoricalEvent[]>([]);
-  const [isEventDialogOpen, setIsEventDialogOpen] = useState(false);
-  const [newEvent, setNewEvent] = useState<Partial<HistoricalEvent>>({
+  // Local Lore Entries state
+  const [localLoreEntries, setLocalLoreEntries] = useState<LocalLoreEntry[]>([]);
+  const [isLoreEntryDialogOpen, setIsLoreEntryDialogOpen] = useState(false);
+  const [newLoreEntry, setNewLoreEntry] = useState<Partial<LocalLoreEntry>>({
     eventType: '',
-    date: '',
+    recency: 0,
     location: '',
     description: '',
     source: '',
@@ -144,25 +144,25 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   // Search and Filter state
   const [searchQuery, setSearchQuery] = useState('');
   const [filterCredibility, setFilterCredibility] = useState<string>('all');
-  const [filterEventType, setFilterEventType] = useState<string>('all');
+  const [filterLoreType, setFilterLoreType] = useState<string>('all');
 
   // Edit state
-  const [editingEventId, setEditingEventId] = useState<string | null>(null);
+  const [editingLoreEntryId, setEditingLoreEntryId] = useState<string | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Partial<HistoricalEvent>>({});
+  const [editingLoreEntry, setEditingLoreEntry] = useState<Partial<LocalLoreEntry>>({});
 
   // Sorting state
   const [sortField, setSortField] = useState<'date' | 'eventType' | 'credibility'>('date');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
 
   // Bulk selection state
-  const [selectedEventIds, setSelectedEventIds] = useState<Set<string>>(new Set());
+  const [selectedLoreEntryIds, setSelectedLoreEntryIds] = useState<Set<string>>(new Set());
   const [showStatistics, setShowStatistics] = useState(false);
 
   // Data versioning state
   const [showVersionDialog, setShowVersionDialog] = useState(false);
   const [versionItem, setVersionItem] = useState<DataItem | null>(null);
-  const [eventChangeLog, setEventChangeLog] = useState<EventChange[]>([]);
+  const [loreChangeLog, setLoreChangeLog] = useState<LoreChangeLog[]>([]);
   const [showChangeLog, setShowChangeLog] = useState(false);
 
   // Event type selection state
@@ -172,6 +172,16 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   // Risk calculation results state
   const [riskResults, setRiskResults] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
+  const [isStartingAssessment, setIsStartingAssessment] = useState(false);
+  const [currentEventId, setCurrentEventId] = useState<number | null>(null);
+
+  // Submit data state for each card
+  const [isSubmittingH, setIsSubmittingH] = useState(false);
+  const [isSubmittingL, setIsSubmittingL] = useState(false);
+  const [isSubmittingV, setIsSubmittingV] = useState(false);
+  const [hDataSaved, setHDataSaved] = useState(false);
+  const [lDataSaved, setLDataSaved] = useState(false);
+  const [vDataSaved, setVDataSaved] = useState(false);
 
   // H Factor - Detailed Data Entry State
   const [hData, setHData] = useState({
@@ -228,7 +238,6 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     // Supporting data for fragility calculation
     avg_building_age: '', // years
-    construction_quality: '', // 1-5 scale
     structure_type: '',
   });
 
@@ -238,19 +247,28 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const [storyForm, setStoryForm] = useState({
     title: '',
     story_text: '',
-    location_description: ''
+    location_description: '',
+    recency_years: '',
+    credibility: '',
+    spatial_relevance_m: ''
   });
   const [discoverForm, setDiscoverForm] = useState({
     latitude: mapLocation.lat,
     longitude: mapLocation.lng,
-    location_radius_m: 10000
+    location_radius_m: 10000,
+    recency_years: '',
+    credibility: '',
+    spatial_relevance_m: ''
   });
   const [observationForm, setObservationForm] = useState({
     title: '',
     latitude: mapLocation.lat,
     longitude: mapLocation.lng,
     observation_sight: '',
-    observation_sound: ''
+    observation_sound: '',
+    recency_years: '',
+    credibility: '',
+    spatial_relevance_m: ''
   });
 
   // Event Drivers (H) data items
@@ -304,8 +322,8 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   // Local Lore & History (L) data items
   const [localLoreData, setLocalLoreData] = useState<DataItem[]>([
     {
-      id: 'historical-events',
-      name: 'Historical Event Inventory',
+      id: 'local-lore-entries',
+      name: 'Local Lore Entry Inventory',
       description: 'Records of past mass movements',
       status: 'missing',
       fileType: 'CSV, JSON, Excel',
@@ -383,10 +401,10 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     const connected = dataItems.filter(item => item.status === 'connected').length;
     const percentage = ((uploaded + connected) / total) * 100;
 
-    // For Local Lore, boost quality score if we have high-credibility historical events
+    // For Local Lore, boost quality score if we have high-credibility local lore entries
     let qualityBoost = 0;
-    if (factorType === 'L' && historicalEvents.length > 0) {
-      const highCredibilityCount = historicalEvents.filter(
+    if (factorType === 'L' && localLoreEntries.length > 0) {
+      const highCredibilityCount = localLoreEntries.filter(
         e => e.credibility === 'instrumented' || e.credibility === 'eyewitness'
       ).length;
       qualityBoost = Math.min(20, highCredibilityCount * 5); // Up to 20% boost
@@ -617,54 +635,57 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     }
   };
 
-  // Handle adding historical event
-  const handleAddHistoricalEvent = async () => {
-    if (!newEvent.eventType || !newEvent.date || !newEvent.description) {
+  // Handle adding local lore entry
+  const handleAddLocalLoreEntry = async () => {
+    if (!newLoreEntry.eventType || newLoreEntry.recency === undefined || !newLoreEntry.description) {
       toast.error('Please fill in all required fields');
       return;
     }
 
     try {
-      // Call backend API to create event
-      const response = await historicalEventAPI.create({
-        location_id: 1, // Default location, update based on your needs
-        eventType: newEvent.eventType || '',
-        date: newEvent.date || '',
-        location: newEvent.location || '',
-        description: newEvent.description || '',
-        source: newEvent.source || '',
-        credibility: newEvent.credibility as any || 'newspaper',
-        spatialAccuracy: newEvent.spatialAccuracy as any || 'approximate',
+      // Save to local_lore table with proper column mapping
+      const response = await lFactorAPI.submitStory({
+        location_name: locationName,
+        latitude: mapLocation.lat,
+        longitude: mapLocation.lng,
+        location_description: `L Factor story collected on ${new Date().toLocaleDateString()}`,
+        region: '',
+        title: newLoreEntry.eventType || 'Local Lore Entry',
+        story: newLoreEntry.description || '',
+        location_place: newLoreEntry.location || locationName,
+        years_ago: newLoreEntry.recency,
+        credibility: newLoreEntry.credibility || 'newspaper',
+        spatial_accuracy: newLoreEntry.spatialAccuracy || 'approximate',
       });
 
       const now = new Date();
-      const event: HistoricalEvent = {
-        id: response.id.toString(),
-        eventType: newEvent.eventType || '',
-        date: newEvent.date || '',
-        location: newEvent.location || '',
-        description: newEvent.description || '',
-        source: newEvent.source || '',
-        credibility: newEvent.credibility || 'newspaper',
-        spatialAccuracy: newEvent.spatialAccuracy || 'approximate',
+      const loreEntry: LocalLoreEntry = {
+        id: response.lore_id.toString(),
+        eventType: newLoreEntry.eventType || '',
+        recency: newLoreEntry.recency || 0,
+        location: newLoreEntry.location || '',
+        description: newLoreEntry.description || '',
+        source: newLoreEntry.source || '',
+        credibility: newLoreEntry.credibility || 'newspaper',
+        spatialAccuracy: newLoreEntry.spatialAccuracy || 'approximate',
         createdAt: now,
         lastModified: now
       };
 
-      setHistoricalEvents(prev => [...prev, event]);
+      setLocalLoreEntries(prev => [...prev, event]);
 
       // Add to change log
-      setEventChangeLog(prev => [...prev, {
+      setLoreChangeLog(prev => [...prev, {
         timestamp: now,
         action: 'created',
-        eventId: event.id,
-        changes: `Created new ${event.eventType} event: ${event.date}`
+        loreEntryId: loreEntry.id,
+        changes: `Created new ${loreEntry.eventType} lore entry: ${loreEntry.recency} years ago`
       }]);
 
-      setIsEventDialogOpen(false);
-      setNewEvent({
+      setIsLoreEntryDialogOpen(false);
+      setNewLoreEntry({
         eventType: '',
-        date: '',
+        recency: 0,
         location: '',
         description: '',
         source: '',
@@ -673,140 +694,143 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       });
 
       // Update Local Lore status to uploaded if first event
-      if (historicalEvents.length === 0) {
+      if (localLoreEntries.length === 0) {
         setLocalLoreData(prev => prev.map(item =>
-          item.id === 'historical-events' ? { ...item, status: 'uploaded' as const } : item
+          item.id === 'local-lore-entries' ? { ...item, status: 'uploaded' as const } : item
         ));
       }
 
-      toast.success('Historical event saved successfully!');
+      toast.success(`L Factor story saved to database! Lore ID: ${response.lore_id}`);
     } catch (error) {
-      console.error('Failed to save historical event:', error);
+      console.error('Failed to save local lore entry:', error);
       toast.error(`Failed to save event: ${getErrorMessage(error)}`);
     }
   };
 
-  // Handle deleting historical event
-  const handleDeleteEvent = async (eventId: string) => {
+  // Handle deleting local lore entry
+  const handleDeleteLoreEntry = async (loreEntryId: string) => {
     try {
-      const deletedEvent = historicalEvents.find(e => e.id === eventId);
-      
-      // Call backend API to delete event
-      await historicalEventAPI.delete(eventId);
-      
-      setHistoricalEvents(prev => prev.filter(e => e.id !== eventId));
+      const deletedLoreEntry = localLoreEntries.find(e => e.id === loreEntryId);
+
+      // Call backend API to delete event from local_lore table
+      await lFactorAPI.delete(loreEntryId);
+
+      setLocalLoreEntries(prev => prev.filter(e => e.id !== loreEntryId));
 
       // Add to change log
-      if (deletedEvent) {
-        setEventChangeLog(prev => [...prev, {
+      if (deletedLoreEntry) {
+        setLoreChangeLog(prev => [...prev, {
           timestamp: new Date(),
           action: 'deleted',
-          eventId: eventId,
-          changes: `Deleted ${deletedEvent.eventType} event: ${deletedEvent.date}`,
-          previousData: deletedEvent
+          loreEntryId: loreEntryId,
+          changes: `Deleted ${deletedLoreEntry.eventType} lore entry: ${deletedLoreEntry.recency}`,
+          previousData: deletedLoreEntry
         }]);
       }
 
       // Update Local Lore status back to missing if no events left
-      if (historicalEvents.length === 1) {
+      if (localLoreEntries.length === 1) {
         setLocalLoreData(prev => prev.map(item =>
-          item.id === 'historical-events' ? { ...item, status: 'missing' as const } : item
+          item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
         ));
       }
 
-      toast.success('Historical event deleted successfully');
+      toast.success('L Factor story deleted successfully');
     } catch (error) {
-      console.error('Failed to delete historical event:', error);
+      console.error('Failed to delete local lore entry:', error);
       toast.error(`Failed to delete event: ${getErrorMessage(error)}`);
     }
   };
 
   // Handle opening edit dialog
-  const handleOpenEditDialog = (event: HistoricalEvent) => {
-    setEditingEventId(event.id);
-    setEditingEvent({
-      eventType: event.eventType,
-      date: event.date,
-      location: event.location,
-      description: event.description,
-      source: event.source,
-      credibility: event.credibility,
-      spatialAccuracy: event.spatialAccuracy
+  const handleOpenEditLoreDialog = (loreEntry: LocalLoreEntry) => {
+    setEditingLoreEntryId(loreEntry.id);
+    setEditingLoreEntry({
+      eventType: loreEntry.eventType,
+      recency: loreEntry.recency,
+      location: loreEntry.location,
+      description: loreEntry.description,
+      source: loreEntry.source,
+      credibility: loreEntry.credibility,
+      spatialAccuracy: loreEntry.spatialAccuracy
     });
     setIsEditDialogOpen(true);
   };
 
   // Handle saving edited event
-  const handleSaveEditedEvent = async () => {
-    if (!editingEventId || !editingEvent.eventType || !editingEvent.date || !editingEvent.description) {
+  const handleSaveEditedLoreEntry = async () => {
+    if (!editingLoreEntryId || !editingLoreEntry.eventType || editingLoreEntry.recency === undefined || !editingLoreEntry.description) {
       toast.error('Please fill in all required fields');
       return;
     }
 
     try {
       const now = new Date();
-      const originalEvent = historicalEvents.find(e => e.id === editingEventId);
+      const originalLoreEntry = localLoreEntries.find(e => e.id === editingLoreEntryId);
 
       // Build changes description
       const changes = [];
-      if (originalEvent) {
-        if (editingEvent.eventType && editingEvent.eventType !== originalEvent.eventType) {
-          changes.push(`type: ${originalEvent.eventType} → ${editingEvent.eventType}`);
+      if (originalLoreEntry) {
+        if (editingLoreEntry.eventType && editingLoreEntry.eventType !== originalLoreEntry.eventType) {
+          changes.push(`type: ${originalLoreEntry.eventType} → ${editingLoreEntry.eventType}`);
         }
-        if (editingEvent.date && editingEvent.date !== originalEvent.date) {
-          changes.push(`date: ${originalEvent.date} → ${editingEvent.date}`);
+        if (editingLoreEntry.recency !== undefined && editingLoreEntry.recency !== originalLoreEntry.recency) {
+          changes.push(`recency: ${originalLoreEntry.recency} years → ${editingLoreEntry.recency} years`);
         }
-        if (editingEvent.credibility && editingEvent.credibility !== originalEvent.credibility) {
-          changes.push(`credibility: ${originalEvent.credibility} → ${editingEvent.credibility}`);
+        if (editingLoreEntry.credibility && editingLoreEntry.credibility !== originalLoreEntry.credibility) {
+          changes.push(`credibility: ${originalLoreEntry.credibility} → ${editingLoreEntry.credibility}`);
         }
       }
 
-      // Call backend API to update event
-      await historicalEventAPI.update(editingEventId, {
-        location_id: 1,
-        eventType: editingEvent.eventType || '',
-        date: editingEvent.date || '',
-        location: editingEvent.location || '',
-        description: editingEvent.description || '',
-        source: editingEvent.source || '',
-        credibility: editingEvent.credibility as any || 'newspaper',
-        spatialAccuracy: editingEvent.spatialAccuracy as any || 'approximate',
+      // Call backend API to update event in local_lore table
+      await lFactorAPI.update(editingLoreEntryId, {
+        location_name: locationName,
+        latitude: mapLocation.lat,
+        longitude: mapLocation.lng,
+        location_description: `L Factor story updated on ${new Date().toLocaleDateString()}`,
+        region: '',
+        title: editingLoreEntry.eventType || 'Local Lore Entry',
+        story: editingLoreEntry.description || '',
+        location_place: editingLoreEntry.location || locationName,
+        years_ago: editingLoreEntry.recency,
+        credibility: editingLoreEntry.credibility || 'newspaper',
+        spatial_accuracy: editingLoreEntry.spatialAccuracy || 'approximate',
       });
 
-      setHistoricalEvents(prev => prev.map(event =>
-        event.id === editingEventId
+      setLocalLoreEntries(prev => prev.map(loreEntry =>
+        loreEntry.id === editingLoreEntryId
           ? {
-              ...event,
-              eventType: editingEvent.eventType || event.eventType,
-              date: editingEvent.date || event.date,
-              location: editingEvent.location || event.location,
-              description: editingEvent.description || event.description,
-              source: editingEvent.source || event.source,
-              credibility: editingEvent.credibility || event.credibility,
-              spatialAccuracy: editingEvent.spatialAccuracy || event.spatialAccuracy,
+              ...loreEntry,
+              eventType: editingLoreEntry.eventType || loreEntry.eventType,
+              recency: editingLoreEntry.recency !== undefined ? editingLoreEntry.recency : loreEntry.recency,
+              location: editingLoreEntry.location || loreEntry.location,
+              description: editingLoreEntry.description || loreEntry.description,
+              source: editingLoreEntry.source || loreEntry.source,
+              credibility: editingLoreEntry.credibility || loreEntry.credibility,
+              spatialAccuracy: editingLoreEntry.spatialAccuracy || loreEntry.spatialAccuracy,
               lastModified: now
             }
-          : event
+          : loreEntry
       ));
 
       // Add to change log
-      if (originalEvent && changes.length > 0) {
-        setEventChangeLog(prev => [...prev, {
+      if (originalLoreEntry && changes.length > 0) {
+        setLoreChangeLog(prev => [...prev, {
           timestamp: now,
           action: 'edited',
-          eventId: editingEventId,
-          changes: `Edited event: ${changes.join(', ')}`,
-          previousData: originalEvent
+          loreEntryId: editingLoreEntryId,
+          changes: `Edited lore entry: ${changes.join(', ')}`,
+          previousData: originalLoreEntry
         }]);
       }
 
       setIsEditDialogOpen(false);
-      setEditingEventId(null);
-      setEditingEvent({});
+      setEditingLoreEntryId(null);
+      setEditingLoreEntry({});
 
-      toast.success('Historical event updated successfully!');
+      toast.success('Local lore entry updated successfully!');
     } catch (error) {
-      console.error('Failed to update historical event:', error);
+      console.error('Failed to update local lore entry:', error);
       toast.error(`Failed to update event: ${getErrorMessage(error)}`);
     }
   };
@@ -814,13 +838,13 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   // Handle canceling edit
   const handleCancelEdit = () => {
     setIsEditDialogOpen(false);
-    setEditingEventId(null);
-    setEditingEvent({});
+    setEditingLoreEntryId(null);
+    setEditingLoreEntry({});
   };
 
   // Handle bulk selection
-  const handleToggleSelectEvent = (eventId: string) => {
-    setSelectedEventIds(prev => {
+  const handleToggleSelectEvent = (loreEntryId: string) => {
+    setSelectedLoreEntryIds(prev => {
       const newSet = new Set(prev);
       if (newSet.has(eventId)) {
         newSet.delete(eventId);
@@ -833,46 +857,46 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
   // Handle select all visible events
   const handleSelectAllVisible = () => {
-    if (selectedEventIds.size === filteredAndSortedEvents.length) {
+    if (selectedLoreEntryIds.size === filteredAndSortedLoreEntries.length) {
       // If all visible are selected, deselect all
-      setSelectedEventIds(new Set());
+      setSelectedLoreEntryIds(new Set());
     } else {
       // Select all visible events
-      setSelectedEventIds(new Set(filteredAndSortedEvents.map(e => e.id)));
+      setSelectedLoreEntryIds(new Set(filteredAndSortedLoreEntries.map(e => e.id)));
     }
   };
 
   // Handle bulk delete
   const handleBulkDelete = () => {
-    if (selectedEventIds.size === 0) return;
+    if (selectedLoreEntryIds.size === 0) return;
 
-    setHistoricalEvents(prev => prev.filter(e => !selectedEventIds.has(e.id)));
-    setSelectedEventIds(new Set());
+    setLocalLoreEntries(prev => prev.filter(e => !selectedLoreEntryIds.has(e.id)));
+    setSelectedLoreEntryIds(new Set());
 
     // Update Local Lore status back to missing if no events left
-    if (historicalEvents.length === selectedEventIds.size) {
+    if (localLoreEntries.length === selectedLoreEntryIds.size) {
       setLocalLoreData(prev => prev.map(item =>
-        item.id === 'historical-events' ? { ...item, status: 'missing' as const } : item
+        item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
       ));
     }
   };
 
   // Handle bulk export
-  const handleBulkExportCSV = () => {
-    if (selectedEventIds.size === 0) return;
+  const handleBulkExportLoreCSV = () => {
+    if (selectedLoreEntryIds.size === 0) return;
 
-    const selectedEvents = historicalEvents.filter(e => selectedEventIds.has(e.id));
-    const headers = ['Event Type', 'Date', 'Location', 'Description', 'Source', 'Credibility', 'Spatial Accuracy'];
+    const selectedLoreEntries = localLoreEntries.filter(e => selectedLoreEntryIds.has(e.id));
+    const headers = ['Lore Type', 'Recency (years ago)', 'Location', 'Description', 'Source', 'Credibility', 'Spatial Accuracy'];
     const csvContent = [
       headers.join(','),
-      ...selectedEvents.map(event => [
-        `"${event.eventType}"`,
-        `"${event.date}"`,
-        `"${event.location}"`,
-        `"${event.description.replace(/"/g, '""')}"`,
-        `"${event.source}"`,
-        `"${event.credibility}"`,
-        `"${event.spatialAccuracy}"`
+      ...selectedLoreEntries.map(loreEntry => [
+        `"${loreEntry.eventType}"`,
+        `"${loreEntry.recency}"`,
+        `"${loreEntry.location}"`,
+        `"${loreEntry.description.replace(/"/g, '""')}"`,
+        `"${loreEntry.source}"`,
+        `"${loreEntry.credibility}"`,
+        `"${loreEntry.spatialAccuracy}"`
       ].join(','))
     ].join('\n');
 
@@ -888,10 +912,10 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   };
 
   const handleBulkExportJSON = () => {
-    if (selectedEventIds.size === 0) return;
+    if (selectedLoreEntryIds.size === 0) return;
 
-    const selectedEvents = historicalEvents.filter(e => selectedEventIds.has(e.id));
-    const jsonContent = JSON.stringify(selectedEvents, null, 2);
+    const selectedLoreEntries = localLoreEntries.filter(e => selectedLoreEntryIds.has(e.id));
+    const jsonContent = JSON.stringify(selectedLoreEntries, null, 2);
     const blob = new Blob([jsonContent], { type: 'application/json' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -904,20 +928,20 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   };
 
   // Handle exporting events to CSV
-  const handleExportCSV = () => {
-    if (historicalEvents.length === 0) return;
+  const handleExportLoreCSV = () => {
+    if (localLoreEntries.length === 0) return;
 
-    const headers = ['Event Type', 'Date', 'Location', 'Description', 'Source', 'Credibility', 'Spatial Accuracy'];
+    const headers = ['Lore Type', 'Recency (years ago)', 'Location', 'Description', 'Source', 'Credibility', 'Spatial Accuracy'];
     const csvContent = [
       headers.join(','),
-      ...historicalEvents.map(event => [
-        `"${event.eventType}"`,
-        `"${event.date}"`,
-        `"${event.location}"`,
-        `"${event.description.replace(/"/g, '""')}"`,
-        `"${event.source}"`,
-        `"${event.credibility}"`,
-        `"${event.spatialAccuracy}"`
+      ...localLoreEntries.map(loreEntry => [
+        `"${loreEntry.eventType}"`,
+        `"${loreEntry.recency}"`,
+        `"${loreEntry.location}"`,
+        `"${loreEntry.description.replace(/"/g, '""')}"`,
+        `"${loreEntry.source}"`,
+        `"${loreEntry.credibility}"`,
+        `"${loreEntry.spatialAccuracy}"`
       ].join(','))
     ].join('\n');
 
@@ -934,9 +958,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
   // Handle exporting events to JSON
   const handleExportJSON = () => {
-    if (historicalEvents.length === 0) return;
+    if (localLoreEntries.length === 0) return;
 
-    const jsonContent = JSON.stringify(historicalEvents, null, 2);
+    const jsonContent = JSON.stringify(localLoreEntries, null, 2);
     const blob = new Blob([jsonContent], { type: 'application/json' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -948,23 +972,23 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     document.body.removeChild(link);
   };
 
-  // Filter and sort historical events
-  const filteredAndSortedEvents = historicalEvents
-    .filter(event => {
+  // Filter and sort local lore entries
+  const filteredAndSortedLoreEntries = localLoreEntries
+    .filter(loreEntry => {
       // Search filter (searches across multiple fields)
       const searchLower = searchQuery.toLowerCase();
       const matchesSearch = searchQuery === '' ||
-        event.eventType.toLowerCase().includes(searchLower) ||
-        event.date.toLowerCase().includes(searchLower) ||
-        event.location.toLowerCase().includes(searchLower) ||
-        event.description.toLowerCase().includes(searchLower) ||
-        event.source.toLowerCase().includes(searchLower);
+        loreEntry.eventType.toLowerCase().includes(searchLower) ||
+        loreEntry.recency.toString().includes(searchLower) ||
+        loreEntry.location.toLowerCase().includes(searchLower) ||
+        loreEntry.description.toLowerCase().includes(searchLower) ||
+        loreEntry.source.toLowerCase().includes(searchLower);
 
       // Credibility filter
-      const matchesCredibility = filterCredibility === 'all' || event.credibility === filterCredibility;
+      const matchesCredibility = filterCredibility === 'all' || loreEntry.credibility === filterCredibility;
 
       // Event type filter
-      const matchesEventType = filterEventType === 'all' || event.eventType.toLowerCase().includes(filterEventType.toLowerCase());
+      const matchesEventType = filterLoreType === 'all' || loreEntry.eventType.toLowerCase().includes(filterLoreType.toLowerCase());
 
       return matchesSearch && matchesCredibility && matchesEventType;
     })
@@ -985,22 +1009,22 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     });
 
   // Get unique event types for filter dropdown
-  const uniqueEventTypes = Array.from(new Set(historicalEvents.map(e => e.eventType).filter(t => t)));
+  const uniqueEventTypes = Array.from(new Set(localLoreEntries.map(e => e.eventType).filter(t => t)));
 
   // Calculate statistics
   const statistics = {
-    total: historicalEvents.length,
-    byType: historicalEvents.reduce((acc, event) => {
-      acc[event.eventType] = (acc[event.eventType] || 0) + 1;
+    total: localLoreEntries.length,
+    byType: localLoreEntries.reduce((acc, event) => {
+      acc[loreEntry.eventType] = (acc[loreEntry.eventType] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
-    byCredibility: historicalEvents.reduce((acc, event) => {
-      acc[event.credibility] = (acc[event.credibility] || 0) + 1;
+    byCredibility: localLoreEntries.reduce((acc, event) => {
+      acc[loreEntry.credibility] = (acc[loreEntry.credibility] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
-    dateRange: historicalEvents.length > 0 ? {
-      earliest: historicalEvents.map(e => e.date).sort()[0],
-      latest: historicalEvents.map(e => e.date).sort()[historicalEvents.length - 1]
+    dateRange: localLoreEntries.length > 0 ? {
+      earliest: localLoreEntries.map(e => e.date).sort()[0],
+      latest: localLoreEntries.map(e => e.date).sort()[localLoreEntries.length - 1]
     } : null
   };
 
@@ -1008,10 +1032,10 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const clearFilters = () => {
     setSearchQuery('');
     setFilterCredibility('all');
-    setFilterEventType('all');
+    setFilterLoreType('all');
   };
 
-  const hasActiveFilters = searchQuery !== '' || filterCredibility !== 'all' || filterEventType !== 'all';
+  const hasActiveFilters = searchQuery !== '' || filterCredibility !== 'all' || filterLoreType !== 'all';
 
   // ========== AI-DRIVEN LORE COLLECTION HANDLERS ==========
 
@@ -1022,8 +1046,8 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       setLoreStories(response.stories);
       console.log(`Loaded ${response.count} lore stories`);
     } catch (error) {
-      console.error('Failed to load lore stories:', error);
-      toast.error('Failed to load lore stories');
+      // Silently fail - this is an optional advanced feature
+      console.log('AI-driven lore collection not available (optional feature)');
     }
   };
 
@@ -1208,6 +1232,157 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     return () => clearTimeout(timeoutId);
   }, [mapLocation.lat, mapLocation.lng]);
 
+  // Auto-fill slope and curvature from elevation data
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      try {
+        // Fetch elevation at 9 points in a grid around the location
+        // This allows us to calculate slope and curvature
+        const spacing = 0.001; // ~100m spacing
+        const points = [
+          { lat: mapLocation.lat - spacing, lng: mapLocation.lng - spacing }, // SW
+          { lat: mapLocation.lat - spacing, lng: mapLocation.lng },           // S
+          { lat: mapLocation.lat - spacing, lng: mapLocation.lng + spacing }, // SE
+          { lat: mapLocation.lat, lng: mapLocation.lng - spacing },           // W
+          { lat: mapLocation.lat, lng: mapLocation.lng },                     // Center
+          { lat: mapLocation.lat, lng: mapLocation.lng + spacing },           // E
+          { lat: mapLocation.lat + spacing, lng: mapLocation.lng - spacing }, // NW
+          { lat: mapLocation.lat + spacing, lng: mapLocation.lng },           // N
+          { lat: mapLocation.lat + spacing, lng: mapLocation.lng + spacing }, // NE
+        ];
+
+        const locations = points.map(p => `${p.lat},${p.lng}`).join('|');
+        const elevationUrl = `https://api.open-elevation.com/api/v1/lookup?locations=${locations}`;
+
+        const response = await fetch(elevationUrl);
+        const data = await response.json();
+
+        if (data.results && data.results.length === 9) {
+          const elevations = data.results.map((r: any) => r.elevation);
+
+          // Calculate slope (using center point and 4 cardinal directions)
+          const center = elevations[4];
+          const north = elevations[7];
+          const south = elevations[1];
+          const east = elevations[5];
+          const west = elevations[3];
+
+          // Calculate slope in degrees
+          const dx = (east - west) / (2 * spacing * 111000); // Convert degrees to meters
+          const dy = (north - south) / (2 * spacing * 111000);
+          const slopeRadians = Math.atan(Math.sqrt(dx * dx + dy * dy));
+          const slopeDegrees = (slopeRadians * 180) / Math.PI;
+
+          // Calculate curvature (second derivative)
+          // Profile curvature approximation
+          const curvature = ((north + south - 2 * center) + (east + west - 2 * center)) / 2;
+          const normalizedCurvature = curvature / 1000; // Normalize to reasonable range
+
+          // Auto-fill only if fields are empty (allow user override)
+          if (!hData.slope_avg) {
+            setHData(prev => ({ ...prev, slope_avg: slopeDegrees.toFixed(2) }));
+          }
+          if (!hData.curvature) {
+            setHData(prev => ({ ...prev, curvature: normalizedCurvature.toFixed(4) }));
+          }
+        }
+      } catch (error) {
+        console.error('Slope/curvature auto-fill error:', error);
+      }
+    }, 1500); // Delay slightly more to avoid rate limiting
+
+    return () => clearTimeout(timeoutId);
+  }, [mapLocation.lat, mapLocation.lng]); // Don't include hData to avoid infinite loops
+
+  // Auto-fill population density from OpenStreetMap
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      try {
+        // Use Nominatim reverse geocoding to get area information
+        const nominatimUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${mapLocation.lat}&lon=${mapLocation.lng}&zoom=14&addressdetails=1`;
+
+        const response = await fetch(nominatimUrl, {
+          headers: {
+            'User-Agent': 'GeoRiskMod/1.0' // Required by OSM
+          }
+        });
+        const data = await response.json();
+
+        // Try to estimate population density from area type
+        // This is a rough estimate based on area classification
+        let estimatedDensity = 0;
+
+        if (data.address) {
+          // Rough population density estimates based on area type
+          if (data.address.city || data.address.town) {
+            estimatedDensity = 1500; // Urban
+          } else if (data.address.village || data.address.hamlet) {
+            estimatedDensity = 200; // Rural settlement
+          } else if (data.address.suburb) {
+            estimatedDensity = 2500; // Suburban
+          } else {
+            estimatedDensity = 50; // Very rural
+          }
+
+          // Adjust based on country (rough adjustments)
+          const countryCode = data.address.country_code?.toUpperCase();
+          if (['IN', 'BD', 'PK'].includes(countryCode)) {
+            estimatedDensity *= 3; // Higher density in South Asia
+          } else if (['US', 'CA', 'AU'].includes(countryCode)) {
+            estimatedDensity *= 0.6; // Lower density in sprawling countries
+          }
+        }
+
+        // Auto-fill only if field is empty (allow user override)
+        if (!vData.population_density && estimatedDensity > 0) {
+          setVData(prev => ({ ...prev, population_density: Math.round(estimatedDensity).toString() }));
+        }
+      } catch (error) {
+        console.error('Population density auto-fill error:', error);
+      }
+    }, 2000); // Delay to avoid rate limiting
+
+    return () => clearTimeout(timeoutId);
+  }, [mapLocation.lat, mapLocation.lng]); // Don't include vData to avoid infinite loops
+
+  // Auto-fill rainfall intensity from Open-Meteo API
+  useEffect(() => {
+    const timeoutId = setTimeout(async () => {
+      try {
+        // Use Open-Meteo API for current and recent precipitation data
+        const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${mapLocation.lat}&longitude=${mapLocation.lng}&current=precipitation&hourly=precipitation&past_days=7&forecast_days=1`;
+
+        const response = await fetch(weatherUrl);
+        const data = await response.json();
+
+        if (data.current && data.hourly) {
+          // Get current precipitation (mm/hr)
+          let rainfallIntensity = data.current.precipitation || 0;
+
+          // If no current precipitation, look at recent historical max (past 7 days)
+          // This gives us a sense of recent intense rainfall events
+          if (rainfallIntensity === 0 && data.hourly.precipitation) {
+            const recentPrecip = data.hourly.precipitation.slice(-168); // Last 7 days (168 hours)
+            const maxRecent = Math.max(...recentPrecip.filter((p: number) => p !== null));
+
+            if (maxRecent > 0) {
+              rainfallIntensity = maxRecent;
+            }
+          }
+
+          // Auto-fill only if field is empty (allow user override)
+          if (!hData.rainfall_intensity && rainfallIntensity > 0) {
+            setHData(prev => ({ ...prev, rainfall_intensity: rainfallIntensity.toFixed(1) }));
+          }
+        }
+      } catch (error) {
+        console.error('Rainfall auto-fill error:', error);
+      }
+    }, 2500); // Delay to avoid rate limiting
+
+    return () => clearTimeout(timeoutId);
+  }, [mapLocation.lat, mapLocation.lng]); // Don't include hData to avoid infinite loops
+
   // Check API connection on mount
   useEffect(() => {
     const checkConnection = async () => {
@@ -1232,18 +1407,18 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     checkConnection();
   }, []);
 
-  // Load historical events from backend on mount
+  // Load local lore entries from backend on mount
   useEffect(() => {
     if (!isAPIConnected) return;
 
-    const loadHistoricalEvents = async () => {
-      setIsLoadingEvents(true);
+    const loadLocalLoreEntries = async () => {
+      setIsLoadingLoreEntries(true);
       try {
-        const response = await historicalEventAPI.getAll();
-        const events: HistoricalEvent[] = response.events.map((e: any) => ({
+        const response = await lFactorAPI.getAll();
+        const entries: LocalLoreEntry[] = response.events.map((e: any) => ({
           id: e.id,
           eventType: e.eventType,
-          date: e.date,
+          recency: e.recency || 0,
           location: e.location,
           description: e.description,
           source: e.source,
@@ -1252,26 +1427,26 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
           createdAt: e.created_at ? new Date(e.created_at) : undefined,
           lastModified: e.created_at ? new Date(e.created_at) : undefined
         }));
-        
-        setHistoricalEvents(events);
-        
+
+        setLocalLoreEntries(entries);
+
         // Update Local Lore status if we have events
-        if (events.length > 0) {
+        if (entries.length > 0) {
           setLocalLoreData(prev => prev.map(item =>
-            item.id === 'historical-events' ? { ...item, status: 'uploaded' as const } : item
+            item.id === 'local-lore-entries' ? { ...item, status: 'uploaded' as const } : item
           ));
         }
-        
-        console.log(`Loaded ${events.length} historical events from database`);
+
+        console.log(`Loaded ${entries.length} L Factor stories from database`);
       } catch (error) {
-        console.error('Failed to load historical events:', error);
-        toast.error('Failed to load historical events from database');
+        // Silently fail - table may not exist yet, entries will populate as user adds them
+        console.log('No existing local lore entries found (this is normal for new installations)');
       } finally {
-        setIsLoadingEvents(false);
+        setIsLoadingLoreEntries(false);
       }
     };
 
-    loadHistoricalEvents();
+    loadLocalLoreEntries();
   }, [isAPIConnected]);
 
   // Load data sources from backend on mount
@@ -1326,6 +1501,207 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     const lngDeg = Math.floor(Math.abs(lng));
     const lngMin = Math.floor((Math.abs(lng) - lngDeg) * 60);
     return `${latDeg}°${latMin}'${latDir}, ${lngDeg}°${lngMin}'${lngDir}`;
+  };
+
+  // Handle Start Assessment button click
+  const handleStartAssessment = async () => {
+    try {
+      setIsStartingAssessment(true);
+
+      // Validate required fields
+      if (!selectedEventType) {
+        toast.error('Please select an event type');
+        return;
+      }
+      if (!dateObserved) {
+        toast.error('Please select a date assessed');
+        return;
+      }
+
+      // Create or get location for current coordinates
+      let locationId: number;
+
+      try {
+        // Create a new location with current coordinates
+        const locationResult = await locationAPI.create({
+          name: locationName || `Location at ${formatCoordinates(mapLocation.lat, mapLocation.lng)}`,
+          latitude: mapLocation.lat,
+          longitude: mapLocation.lng,
+          description: `Assessment location for ${selectedEventType}`,
+          region: locationName
+        });
+        locationId = locationResult.location_id;
+      } catch (error: any) {
+        // If location already exists (409 conflict), we could fetch all locations and find matching one
+        // For now, let's use a default location_id of 1 or handle the error
+        console.warn('Location creation warning:', error);
+        // Try to use location_id = 1 as fallback
+        locationId = 1;
+      }
+
+      // Create event in database
+      const eventResult = await eventAPI.create({
+        location_id: locationId,
+        hazard_type: selectedEventType,
+        date_observed: dateObserved
+      });
+
+      setCurrentEventId(eventResult.event_id);
+      toast.success(`Assessment started! Event ID: ${eventResult.event_id}`);
+
+    } catch (error: any) {
+      console.error('Start assessment error:', error);
+      const errorMessage = getErrorMessage(error);
+      toast.error(errorMessage || 'Failed to start assessment. Please check your connection and try again.');
+    } finally {
+      setIsStartingAssessment(false);
+    }
+  };
+
+  // Handle H Factor Submit Data button
+  const handleSubmitHData = async () => {
+    try {
+      setIsSubmittingH(true);
+
+      // Validate required H factor inputs
+      if (!hData.slope_avg) {
+        toast.error('H Factor: Slope is required');
+        return;
+      }
+      if (!hData.curvature) {
+        toast.error('H Factor: Curvature is required');
+        return;
+      }
+      if (!hData.rock_type) {
+        toast.error('H Factor: Lithology class is required');
+        return;
+      }
+      if (!hData.rain_exceed) {
+        toast.error('H Factor: Rainfall exceedance probability is required');
+        return;
+      }
+
+      // Parse lithology class into type and level
+      const lithologyLevel = parseInt(hData.rock_type);
+      let lithologyType = '';
+      if (lithologyLevel <= 2) {
+        lithologyType = 'igneous';
+      } else if (lithologyLevel <= 4) {
+        lithologyType = 'sedimentary';
+      } else {
+        lithologyType = 'weathered';
+      }
+
+      // Prepare data for API submission
+      const submissionData = {
+        // Location data
+        location_name: locationName,
+        latitude: mapLocation.lat,
+        longitude: mapLocation.lng,
+        location_description: `H Factor data collected on ${new Date().toLocaleDateString()}`,
+        region: '',
+
+        // Event data
+        hazard_type: 'landslide',
+        date_observed: dateObserved || new Date().toISOString().split('T')[0],
+
+        // H Factor - Terrain data (for event table)
+        slope_angle: parseFloat(hData.slope_avg),
+        curvature_number: parseFloat(hData.curvature),
+        lithology_type: lithologyType,
+        lithology_level: lithologyLevel,
+
+        // H Factor - Rainfall data (for dynamic_trigger table)
+        rainfall_intensity_mm_hr: hData.rainfall_intensity ? parseFloat(hData.rainfall_intensity) : undefined,
+        rainfall_duration_hrs: hData.rainfall_duration ? parseFloat(hData.rainfall_duration) : undefined,
+        rainfall_exceedance: parseFloat(hData.rain_exceed),
+      };
+
+      // Submit to database via API
+      const response = await hFactorAPI.submit(submissionData);
+
+      // Save to localStorage for persistence
+      localStorage.setItem('georiskmod_h_data', JSON.stringify(hData));
+
+      setHDataSaved(true);
+      toast.success(`H Factor data saved to database! Event ID: ${response.event_id}`);
+
+    } catch (error: any) {
+      console.error('H Factor submit error:', error);
+      toast.error(`Failed to save H Factor data: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmittingH(false);
+    }
+  };
+
+  // Handle L Factor Submit Data button
+  const handleSubmitLData = async () => {
+    try {
+      setIsSubmittingL(true);
+
+      // For L Factor, we just validate that some data has been entered
+      // The actual submission happens through the lore API in the L Factor forms
+
+      // Save indicator to localStorage
+      localStorage.setItem('georiskmod_l_data_saved', 'true');
+
+      setLDataSaved(true);
+      toast.success('L Factor data saved successfully!');
+
+    } catch (error: any) {
+      console.error('L Factor submit error:', error);
+      toast.error('Failed to save L Factor data');
+    } finally {
+      setIsSubmittingL(false);
+    }
+  };
+
+  // Handle V Factor Submit Data button
+  const handleSubmitVData = async () => {
+    try {
+      setIsSubmittingV(true);
+
+      // Validate required V factor inputs
+      if (!vData.exposure) {
+        toast.error('V Factor: Exposure score is required');
+        return;
+      }
+      if (!vData.fragility) {
+        toast.error('V Factor: Fragility score is required');
+        return;
+      }
+
+      // Prepare data for API submission
+      const submissionData = {
+        // Location data
+        location_name: locationName,
+        latitude: mapLocation.lat,
+        longitude: mapLocation.lng,
+        location_description: `V Factor data collected on ${new Date().toLocaleDateString()}`,
+        region: '',
+
+        // V Factor data
+        exposure_score: parseFloat(vData.exposure),
+        fragility_score: parseFloat(vData.fragility),
+        criticality_score: vData.criticality_weight ? parseFloat(vData.criticality_weight) : undefined,
+        population_density: vData.population_density ? parseFloat(vData.population_density) : undefined,
+      };
+
+      // Submit to database via API
+      const response = await vFactorAPI.submit(submissionData);
+
+      // Save to localStorage for persistence
+      localStorage.setItem('georiskmod_v_data', JSON.stringify(vData));
+
+      setVDataSaved(true);
+      toast.success(`V Factor data saved to database! Vulnerability ID: ${response.vulnerability_id}`);
+
+    } catch (error: any) {
+      console.error('V Factor submit error:', error);
+      toast.error(`Failed to save V Factor data: ${error.message || 'Unknown error'}`);
+    } finally {
+      setIsSubmittingV(false);
+    }
   };
 
   // Handle Calculate Risk button click
@@ -1393,21 +1769,8 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         date_observed: dateObserved
       };
 
-      // Call API endpoint
-      const response = await fetch('http://localhost:8001/api/calculate-risk', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestData),
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.detail || 'Risk calculation failed');
-      }
-
-      const result = await response.json();
+      // Call API endpoint using the API service
+      const result = await riskCalculationAPI.calculate(requestData);
       setRiskResults(result.data);
 
       // Notify parent component of risk calculation
@@ -1418,7 +1781,8 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       toast.success(`Risk calculated successfully! Risk Level: ${result.data.risk_level}`);
     } catch (error: any) {
       console.error('Risk calculation error:', error);
-      toast.error(error.message || 'Failed to calculate risk. Make sure the backend server is running.');
+      const errorMessage = getErrorMessage(error);
+      toast.error(errorMessage || 'Failed to calculate risk. Please check your connection and try again.');
     } finally {
       setIsCalculating(false);
     }
@@ -1473,38 +1837,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const renderHFactorForm = () => {
     return (
       <Card className="p-6">
-        {/* File Upload */}
-        <div className="mb-4">
-          <Label className="text-gray-900 mb-2 block">Upload DEM File (GeoTIFF)</Label>
-          <div className="relative">
-            <input
-              type="file"
-              accept=".tif,.tiff"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) {
-                  setHData({...hData, dem_file: file});
-                  toast.success(`DEM file "${file.name}" selected`);
-                }
-              }}
-              className="hidden"
-              id="dem-file-input"
-            />
-            <label
-              htmlFor="dem-file-input"
-              className="inline-flex items-center justify-center gap-2 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md cursor-pointer transition-colors border border-blue-500"
-            >
-              <Upload className="h-4 w-4" />
-              <span>Choose File</span>
-            </label>
-            {hData.dem_file && (
-              <p className="text-sm text-gray-900 mt-2">Selected: {hData.dem_file.name}</p>
-            )}
-          </div>
-          <p className="text-xs text-gray-700 mt-1">Or enter terrain values manually below</p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="space-y-6">
           <div>
             <Label className="text-gray-900 mb-2 block">Slope (degrees)</Label>
             <Input
@@ -1515,8 +1848,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               placeholder="e.g., 25 (typical range: 0-60)"
               className="bg-gray-100 border-gray-300 text-gray-900"
             />
-            <p className="text-xs text-gray-700 mt-1">Average slope angle. Steeper slopes increase landslide susceptibility.</p>
+            <p className="text-xs text-gray-700 mt-1">Average slope angle. Steeper slopes increase landslide susceptibility. (Auto-filled from elevation data, editable)</p>
           </div>
+
           <div>
             <Label className="text-gray-900 mb-2 block">Curvature (1/m)</Label>
             <Input
@@ -1527,11 +1861,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               placeholder="e.g., -0.5 (concave)"
               className="bg-gray-100 border-gray-300 text-gray-900"
             />
-            <p className="text-xs text-gray-700 mt-1">Terrain curvature. Negative (concave) areas accumulate water and increase risk.</p>
+            <p className="text-xs text-gray-700 mt-1">Terrain curvature. Negative (concave) areas accumulate water and increase risk. (Auto-filled from elevation data, editable)</p>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 gap-4 mb-6">
           <div>
             <Label className="text-gray-900 mb-2 block">Lithology Class (1-5)</Label>
             <Select
@@ -1551,9 +1883,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             </Select>
             <p className="text-xs text-gray-700 mt-1">Rock and soil erodibility classification. Higher values indicate more susceptible materials.</p>
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-4">
           <div>
             <Label className="text-gray-900 mb-2 block">Rainfall Intensity (mm/hr)</Label>
             <Input
@@ -1564,8 +1894,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               placeholder="e.g., 50"
               className="bg-gray-100 border-gray-300 text-gray-900"
             />
-            <p className="text-xs text-gray-700 mt-1">Hourly rainfall rate that triggered or may trigger the event.</p>
+            <p className="text-xs text-gray-700 mt-1">Hourly rainfall rate that triggered or may trigger the loreEntry. (Auto-filled from Open-Meteo weather data, editable)</p>
           </div>
+
           <div>
             <Label className="text-gray-900 mb-2 block">Duration (hours)</Label>
             <Input
@@ -1578,6 +1909,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             />
             <p className="text-xs text-gray-700 mt-1">Length of time the rainfall intensity persists.</p>
           </div>
+
           <div>
             <Label className="text-gray-900 mb-2 block">Exceedance Probability (0-1)</Label>
             <Input
@@ -1592,18 +1924,6 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             />
             <p className="text-xs text-gray-700 mt-1">Probability that this rainfall event will be exceeded. Higher values = more extreme events.</p>
           </div>
-          <div>
-            <Label className="text-gray-900 mb-2 block">Return Period (years)</Label>
-            <Input
-              type="number"
-              step="1"
-              value={hData.return_period}
-              onChange={(e) => setHData({...hData, return_period: e.target.value})}
-              placeholder="e.g., 100"
-              className="bg-gray-100 border-gray-300 text-gray-900"
-            />
-            <p className="text-xs text-gray-700 mt-1">Statistical recurrence interval for rainfall events of this magnitude.</p>
-          </div>
         </div>
       </Card>
     );
@@ -1613,7 +1933,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const renderVFactorForm = () => {
     return (
       <Card className="p-6">
-        <div className="grid grid-cols-2 gap-4 mb-6">
+        <div className="space-y-6">
           <div>
             <Label className="text-gray-900 mb-2 block">Exposure Score (0-1)</Label>
             <Input
@@ -1628,6 +1948,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             />
             <p className="text-xs text-gray-700 mt-1">Measure of people, buildings, and infrastructure at risk in the area (0=none, 1=maximum).</p>
           </div>
+
           <div>
             <Label className="text-gray-900 mb-2 block">Fragility Score (0-1)</Label>
             <Input
@@ -1642,8 +1963,9 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             />
             <p className="text-xs text-gray-700 mt-1">Susceptibility of structures to damage from the hazard (0=resilient, 1=highly susceptible).</p>
           </div>
-          <div className="col-span-2">
-            <Label className="text-gray-900 mb-2 block">Criticality Weight (optional)</Label>
+
+          <div>
+            <Label className="text-gray-900 mb-2 block">Criticality Score (0-1)</Label>
             <Input
               type="number"
               step="0.01"
@@ -1651,14 +1973,12 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               max="1"
               value={vData.criticality_weight}
               onChange={(e) => setVData({...vData, criticality_weight: e.target.value})}
-              placeholder="e.g., 0.3 (default)"
+              placeholder="e.g., 0.8 for hospital, 0.3 for warehouse"
               className="bg-gray-100 border-gray-300 text-gray-900"
             />
-            <p className="text-xs text-gray-700 mt-1">Optional weight factor for areas with critical facilities (hospitals, schools, emergency services).</p>
+            <p className="text-xs text-gray-700 mt-1">Importance of assets in the area based on societal function (0=low importance, 1=critical infrastructure like hospitals, schools, emergency services).</p>
           </div>
-        </div>
 
-        <div className="grid grid-cols-2 gap-4 mb-6">
           <div>
             <Label className="text-gray-900 mb-2 block">Population Density (people/km²)</Label>
             <Input
@@ -1669,96 +1989,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               placeholder="e.g., 250"
               className="bg-gray-100 border-gray-300 text-gray-900"
             />
-            <p className="text-xs text-gray-700 mt-1">Number of people per square kilometer in the affected area.</p>
-          </div>
-          <div>
-            <Label className="text-gray-900 mb-2 block">Building Count</Label>
-            <Input
-              type="number"
-              step="1"
-              value={vData.building_count}
-              onChange={(e) => setVData({...vData, building_count: e.target.value})}
-              placeholder="e.g., 350"
-              className="bg-gray-100 border-gray-300 text-gray-900"
-            />
-            <p className="text-xs text-gray-700 mt-1">Total number of structures in the area that could be affected.</p>
-          </div>
-          <div>
-            <Label className="text-gray-900 mb-2 block">Road Length (m)</Label>
-            <Input
-              type="number"
-              step="1"
-              value={vData.road_length}
-              onChange={(e) => setVData({...vData, road_length: e.target.value})}
-              placeholder="e.g., 15000"
-              className="bg-gray-100 border-gray-300 text-gray-900"
-            />
-            <p className="text-xs text-gray-700 mt-1">Total length of roadways in meters that could be impacted.</p>
-          </div>
-          <div>
-            <Label className="text-gray-900 mb-2 block">Critical Facilities Count</Label>
-            <Input
-              type="number"
-              step="1"
-              value={vData.critical_facilities_count}
-              onChange={(e) => setVData({...vData, critical_facilities_count: e.target.value})}
-              placeholder="e.g., 5"
-              className="bg-gray-100 border-gray-300 text-gray-900"
-            />
-            <p className="text-xs text-gray-700 mt-1">Number of essential facilities (hospitals, schools, emergency services) in the area.</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <Label className="text-gray-900 mb-2 block">Average Building Age (years)</Label>
-            <Input
-              type="number"
-              step="1"
-              value={vData.avg_building_age}
-              onChange={(e) => setVData({...vData, avg_building_age: e.target.value})}
-              placeholder="e.g., 35"
-              className="bg-gray-100 border-gray-300 text-gray-900"
-            />
-            <p className="text-xs text-gray-700 mt-1">Mean age of buildings in the area. Older structures tend to have higher fragility.</p>
-          </div>
-          <div>
-            <Label className="text-gray-900 mb-2 block">Construction Quality (1-5)</Label>
-            <Select
-              value={vData.construction_quality}
-              onValueChange={(val) => setVData({...vData, construction_quality: val})}
-            >
-              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
-                <SelectValue placeholder="Select quality" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border-gray-300 text-gray-900">
-                <SelectItem value="1">1 - Poor (high fragility)</SelectItem>
-                <SelectItem value="2">2 - Below Average</SelectItem>
-                <SelectItem value="3">3 - Average</SelectItem>
-                <SelectItem value="4">4 - Good</SelectItem>
-                <SelectItem value="5">5 - Excellent (low fragility)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-700 mt-1">Building construction quality rating. Lower quality indicates higher fragility.</p>
-          </div>
-          <div className="col-span-2">
-            <Label className="text-gray-900 mb-2 block">Primary Structure Type</Label>
-            <Select
-              value={vData.structure_type}
-              onValueChange={(val) => setVData({...vData, structure_type: val})}
-            >
-              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
-                <SelectValue placeholder="Select type" />
-              </SelectTrigger>
-              <SelectContent className="bg-white border-gray-300 text-gray-900">
-                <SelectItem value="wood_frame">Wood Frame (moderate fragility)</SelectItem>
-                <SelectItem value="unreinforced_masonry">Unreinforced Masonry (high fragility)</SelectItem>
-                <SelectItem value="steel_frame">Steel Frame (low fragility)</SelectItem>
-                <SelectItem value="concrete_frame">Reinforced Concrete (low fragility)</SelectItem>
-                <SelectItem value="mixed">Mixed Construction</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-gray-700 mt-1">Dominant building construction type. Different materials have varying resistance to hazards.</p>
+            <p className="text-xs text-gray-700 mt-1">Number of people per square kilometer in the affected area. (Auto-filled from OpenStreetMap, editable)</p>
           </div>
         </div>
       </Card>
@@ -1928,6 +2159,25 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                     <SelectItem value="lava_flow">Lava Flow</SelectItem>
                   </SelectContent>
                 </Select>
+
+                {/* Start Assessment Button */}
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 mt-3 w-full"
+                  onClick={handleStartAssessment}
+                  disabled={isStartingAssessment}
+                >
+                  {isStartingAssessment ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Starting...
+                    </>
+                  ) : (
+                    'Start Assessment'
+                  )}
+                </Button>
+                {currentEventId && (
+                  <p className="text-xs text-green-400 mt-1">Event ID: {currentEventId}</p>
+                )}
               </div>
 
               {/* Date Assessed Field */}
@@ -1943,145 +2193,153 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               </div>
             </div>
           </div>
-
-          <Button
-            className="bg-blue-600 hover:bg-blue-700 mt-6"
-            onClick={handleCalculateRisk}
-            disabled={isCalculating}
-          >
-            {isCalculating ? (
-              <>
-                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
-                Calculating...
-              </>
-            ) : (
-              'Calculate Risk'
-            )}
-          </Button>
         </div>
 
         {/* Risk Calculation Results */}
         {riskResults && (
-          <Card className="bg-slate-800 border-slate-700 p-6 mt-6">
-            <div className="flex items-center gap-3 mb-6">
-              <BarChart3 className="h-6 w-6 text-blue-400" />
-              <h3 className="text-xl font-semibold text-white">Risk Calculation Results</h3>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Overall Risk Score */}
-              <div className="mb-6">
-                <h4 className="text-white font-semibold mb-2 flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-blue-400" />
-                  Overall Risk Score
-                </h4>
-                <div className="text-4xl font-bold text-white mb-2">
-                  {(riskResults.R_score * 100).toFixed(1)}%
-                </div>
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-sm font-medium ${
-                  riskResults.risk_level === 'very-high' ? 'bg-red-900 text-red-200 border border-red-600' :
-                  riskResults.risk_level === 'high' ? 'bg-orange-900 text-orange-200 border border-orange-600' :
-                  riskResults.risk_level === 'medium' ? 'bg-yellow-900 text-yellow-200 border border-yellow-600' :
-                  riskResults.risk_level === 'low' ? 'bg-blue-900 text-blue-200 border border-blue-600' :
-                  'bg-green-900 text-green-200 border border-green-600'
-                }`}>
-                  {riskResults.risk_level === 'very-high' ? <ShieldX className="h-4 w-4" /> :
-                   riskResults.risk_level === 'high' ? <ShieldAlert className="h-4 w-4" /> :
-                   <ShieldCheck className="h-4 w-4" />}
-                  <span className="capitalize">{riskResults.risk_level.replaceAll('-', ' ')}</span>
-                </div>
-                <p className="text-sm text-white mt-3">
-                  Uncertainty: ±{(riskResults.R_std * 100).toFixed(1)}%
-                </p>
-                <p className="text-sm text-white mt-1">
-                  Gate Status: {riskResults.gate_passed ?
-                    <span className="text-green-400">✓ Passed</span> :
-                    <span className="text-red-400">✗ Failed</span>
-                  }
-                </p>
-              </div>
-
-              {/* Factor Scores */}
-              <div className="mb-6">
-                <h4 className="text-white font-semibold mb-4">Borromean Factor Scores</h4>
-
-                <div className="space-y-3">
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-white text-sm">H - Event Drivers</span>
-                      <span className="text-white font-semibold">{(riskResults.H_score * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-slate-600 rounded-full h-2">
-                      <div
-                        className="bg-blue-500 h-2 rounded-full transition-all duration-500"
-                        style={{width: `${riskResults.H_score * 100}%`}}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-white text-sm">L - Local Lore</span>
-                      <span className="text-white font-semibold">{(riskResults.L_score * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-slate-600 rounded-full h-2">
-                      <div
-                        className="h-2 rounded-full transition-all duration-500"
-                        style={{width: `${riskResults.L_score * 100}%`, backgroundColor: '#8B4513'}}
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className="text-white text-sm">V - Vulnerability</span>
-                      <span className="text-white font-semibold">{(riskResults.V_score * 100).toFixed(1)}%</span>
-                    </div>
-                    <div className="w-full bg-slate-600 rounded-full h-2">
-                      <div
-                        className="bg-purple-500 h-2 rounded-full transition-all duration-500"
-                        style={{width: `${riskResults.V_score * 100}%`}}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-4 p-3 bg-slate-600 rounded">
-                  <p className="text-xs text-white">
-                    <Info className="h-3 w-3 inline mr-1" />
-                    Borromean model requires all three factors (H, L, V) above their thresholds
-                  </p>
+          <div className="bg-slate-800 p-6 mt-6 rounded-lg">
+            {/* White card with colored header */}
+            <Card className="bg-white border-0 overflow-hidden">
+              {/* Header with risk level color - 4-tier system */}
+              <div
+                className="py-4 px-6"
+                style={{
+                  backgroundColor:
+                    riskResults.R_score >= 0.80 ? '#D00000' : // Severe - Red
+                    riskResults.R_score >= 0.60 ? '#FF9F1C' : // High - Orange
+                    riskResults.R_score >= 0.30 ? '#FFD60A' : // Medium - Yellow
+                    '#2D6A4F' // Low - Green
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <BarChart3 className="h-6 w-6 text-white" />
+                  <h3 className="text-xl font-bold text-white">Risk Assessment Results</h3>
                 </div>
               </div>
-            </div>
 
-            {/* Configuration Details */}
-            <Card className="bg-slate-700 border-slate-600 p-4 mt-4">
-              <h4 className="text-white font-semibold mb-3">Calculation Configuration</h4>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 text-sm">
-                <div>
-                  <span className="text-gray-400">Event Type:</span>
-                  <p className="text-white font-medium capitalize">{riskResults.config.hazard_type}</p>
-                </div>
-                <div>
-                  <span className="text-gray-400">H Threshold:</span>
-                  <p className="text-white font-medium">{riskResults.config.tau_H}</p>
-                </div>
-                <div>
-                  <span className="text-gray-400">L Threshold:</span>
-                  <p className="text-white font-medium">{riskResults.config.tau_L}</p>
-                </div>
-                <div>
-                  <span className="text-gray-400">V Threshold:</span>
-                  <p className="text-white font-medium">{riskResults.config.tau_V}</p>
-                </div>
-                <div>
-                  <span className="text-gray-400">Synergy:</span>
-                  <p className="text-white font-medium">{riskResults.config.kappa_synergy}</p>
+              {/* Content - Compact Layout */}
+              <div className="p-6">
+                <div className="flex gap-6">
+                  {/* Left Section - Progress Bars (Half Width) */}
+                  <div className="flex-none w-[45%] space-y-3">
+                    {/* Overall Risk Score */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-gray-700 text-sm font-medium">Overall Risk</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-gray-900 font-semibold text-sm">
+                            {(riskResults.R_score * 100).toFixed(1)}%
+                          </span>
+                          <span className="text-xs text-gray-500">
+                            ±{(riskResults.R_std * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{
+                            width: `${riskResults.R_score * 100}%`,
+                            backgroundColor:
+                              riskResults.R_score >= 0.80 ? '#D00000' : // Severe - Red
+                              riskResults.R_score >= 0.60 ? '#FF9F1C' : // High - Orange
+                              riskResults.R_score >= 0.30 ? '#FFD60A' : // Medium - Yellow
+                              '#2D6A4F' // Low - Green
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* H Factor */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-gray-700 text-sm font-medium">H - Event Drivers</span>
+                        <span className="text-gray-900 font-semibold text-sm">{(riskResults.H_score * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{width: `${riskResults.H_score * 100}%`, backgroundColor: '#263ef7'}}
+                        />
+                      </div>
+                    </div>
+
+                    {/* L Factor */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-gray-700 text-sm font-medium">L - Local Lore</span>
+                        <span className="text-gray-900 font-semibold text-sm">{(riskResults.L_score * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{width: `${riskResults.L_score * 100}%`, backgroundColor: '#30a6ec'}}
+                        />
+                      </div>
+                    </div>
+
+                    {/* V Factor */}
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-gray-700 text-sm font-medium">V - Vulnerability</span>
+                        <span className="text-gray-900 font-semibold text-sm">{(riskResults.V_score * 100).toFixed(1)}%</span>
+                      </div>
+                      <div className="w-full bg-gray-200 rounded-full h-2">
+                        <div
+                          className="h-2 rounded-full transition-all duration-500"
+                          style={{width: `${riskResults.V_score * 100}%`, backgroundColor: '#9c2fee'}}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Section - Information Grid */}
+                  <div className="flex-1 grid grid-cols-2 gap-x-6 gap-y-3 content-start">
+                    {/* Gate Status */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">Gate Status</div>
+                      <div className="text-sm font-semibold">
+                        {riskResults.gate_passed ?
+                          <span className="text-green-600">Passed</span> :
+                          <span className="text-red-600">Failed</span>
+                        }
+                      </div>
+                    </div>
+
+                    {/* Event Type */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">Event Type</div>
+                      <div className="text-sm font-semibold text-gray-900 capitalize">{riskResults.config.hazard_type}</div>
+                    </div>
+
+                    {/* H Threshold */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">H Threshold</div>
+                      <div className="text-sm font-semibold text-gray-900">{riskResults.config.tau_H}</div>
+                    </div>
+
+                    {/* L Threshold */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">L Threshold</div>
+                      <div className="text-sm font-semibold text-gray-900">{riskResults.config.tau_L}</div>
+                    </div>
+
+                    {/* V Threshold */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">V Threshold</div>
+                      <div className="text-sm font-semibold text-gray-900">{riskResults.config.tau_V}</div>
+                    </div>
+
+                    {/* Synergy */}
+                    <div>
+                      <div className="text-xs text-gray-500 mb-1">Synergy Factor</div>
+                      <div className="text-sm font-semibold text-gray-900">{riskResults.config.kappa_synergy}</div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </Card>
-          </Card>
+          </div>
         )}
 
         {/* Three-Card Data Entry */}
@@ -2090,7 +2348,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
             Borromean Risk Model - Data Entry
           </h2>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-16">
             {/* Card 1: H - Event Drivers */}
             <Card className="bg-white p-0 overflow-hidden flex flex-col" style={{maxHeight: '800px'}}>
               <div className="text-white text-center py-3" style={{backgroundColor: '#263ef7'}}>
@@ -2101,13 +2359,40 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               <div className="p-6 overflow-y-auto flex-1">
                 {renderHFactorForm()}
               </div>
+
+              {/* Submit H Data Button */}
+              <div className="p-4 border-t border-gray-200">
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 w-full"
+                  onClick={handleSubmitHData}
+                  disabled={isSubmittingH}
+                >
+                  {isSubmittingH ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Submit Data
+                    </>
+                  )}
+                </Button>
+                {hDataSaved && (
+                  <p className="text-xs text-green-600 mt-2 text-center flex items-center justify-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Data saved
+                  </p>
+                )}
+              </div>
             </Card>
 
             {/* Card 2: L - Local Lore & History */}
             <Card className="bg-white p-0 overflow-hidden flex flex-col" style={{maxHeight: '800px'}}>
               <div className="text-white text-center py-3" style={{backgroundColor: '#30a6ec'}}>
                 <h3 className="font-semibold">L - Local Lore & History</h3>
-                <p className="text-xs mt-1">Place-based evidence and historical events</p>
+                <p className="text-xs mt-1">Place-based evidence and local lore entries</p>
               </div>
 
               <div className="p-6 overflow-y-auto flex-1">
@@ -2158,38 +2443,82 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                           </p>
                         </div>
 
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                           <div>
-                            <Label htmlFor="story-title" className="text-gray-900">Title *</Label>
+                            <Label htmlFor="story-title" className="text-gray-900 mb-2 block">Title *</Label>
                             <Input
                               id="story-title"
                               placeholder="e.g., Old logging road landslide"
                               value={storyForm.title}
                               onChange={(e) => setStoryForm({...storyForm, title: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
+                              className="bg-gray-100 border-gray-300 text-gray-900"
                             />
                           </div>
 
                           <div>
-                            <Label htmlFor="story-text" className="text-gray-900">Story/Lore *</Label>
+                            <Label htmlFor="story-text" className="text-gray-900 mb-2 block">Story/Lore *</Label>
                             <Textarea
                               id="story-text"
                               placeholder="Tell the story... e.g., My grandfather told me about a massive landslide in 1952..."
                               value={storyForm.story_text}
                               onChange={(e) => setStoryForm({...storyForm, story_text: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2 min-h-[300px]"
+                              className="bg-gray-100 border-gray-300 text-gray-900 min-h-[400px]"
                             />
                           </div>
 
                           <div>
-                            <Label htmlFor="story-location" className="text-gray-900">Location (Optional)</Label>
+                            <Label htmlFor="story-location" className="text-gray-900 mb-2 block">Location</Label>
                             <Input
                               id="story-location"
                               placeholder="e.g., Near Eagle Creek, Mt. Hood area"
                               value={storyForm.location_description}
                               onChange={(e) => setStoryForm({...storyForm, location_description: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
+                              className="bg-gray-100 border-gray-300 text-gray-900"
                             />
+                          </div>
+
+                          <div>
+                            <Label htmlFor="story-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
+                            <Input
+                              id="story-recency"
+                              type="number"
+                              placeholder="e.g., 50"
+                              value={storyForm.recency_years}
+                              onChange={(e) => setStoryForm({...storyForm, recency_years: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="story-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
+                            <Select
+                              value={storyForm.credibility}
+                              onValueChange={(value) => setStoryForm({...storyForm, credibility: value})}
+                            >
+                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
+                                <SelectValue placeholder="Select source type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
+                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
+                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="story-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
+                            <Input
+                              id="story-spatial"
+                              type="number"
+                              placeholder="e.g., 100"
+                              value={storyForm.spatial_relevance_m}
+                              onChange={(e) => setStoryForm({...storyForm, spatial_relevance_m: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
                           <div className="flex gap-4">
@@ -2216,51 +2545,95 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                           </p>
                         </div>
 
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="discover-lat" className="text-gray-900">Latitude *</Label>
-                              <Input
-                                id="discover-lat"
-                                type="number"
-                                step="0.0001"
-                                placeholder={mapLocation.lat.toFixed(4)}
-                                value={discoverForm.latitude || ''}
-                                onChange={(e) => setDiscoverForm({...discoverForm, latitude: parseFloat(e.target.value)})}
-                                className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="discover-lon" className="text-gray-900">Longitude *</Label>
-                              <Input
-                                id="discover-lon"
-                                type="number"
-                                step="0.0001"
-                                placeholder={mapLocation.lng.toFixed(4)}
-                                value={discoverForm.longitude || ''}
-                                onChange={(e) => setDiscoverForm({...discoverForm, longitude: parseFloat(e.target.value)})}
-                                className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
-                              />
-                            </div>
+                        <div className="space-y-6">
+                          <div>
+                            <Label htmlFor="discover-lat" className="text-gray-900 mb-2 block">Latitude *</Label>
+                            <Input
+                              id="discover-lat"
+                              type="number"
+                              step="0.0001"
+                              placeholder={mapLocation.lat.toFixed(4)}
+                              value={discoverForm.latitude || ''}
+                              onChange={(e) => setDiscoverForm({...discoverForm, latitude: parseFloat(e.target.value)})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
                           </div>
 
                           <div>
-                            <Label htmlFor="discover-radius" className="text-gray-900">Search Radius (meters)</Label>
+                            <Label htmlFor="discover-lon" className="text-gray-900 mb-2 block">Longitude *</Label>
+                            <Input
+                              id="discover-lon"
+                              type="number"
+                              step="0.0001"
+                              placeholder={mapLocation.lng.toFixed(4)}
+                              value={discoverForm.longitude || ''}
+                              onChange={(e) => setDiscoverForm({...discoverForm, longitude: parseFloat(e.target.value)})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-radius" className="text-gray-900 mb-2 block">Search Radius (meters)</Label>
                             <Input
                               id="discover-radius"
                               type="number"
                               placeholder="10000"
                               value={discoverForm.location_radius_m || ''}
                               onChange={(e) => setDiscoverForm({...discoverForm, location_radius_m: parseInt(e.target.value)})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
+                              className="bg-gray-100 border-gray-300 text-gray-900"
                             />
                             <p className="text-xs text-gray-700 mt-1">Default: 10,000 meters (10 km)</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
+                            <Input
+                              id="discover-recency"
+                              type="number"
+                              placeholder="e.g., 50"
+                              value={discoverForm.recency_years}
+                              onChange={(e) => setDiscoverForm({...discoverForm, recency_years: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
+                            <Select
+                              value={discoverForm.credibility}
+                              onValueChange={(value) => setDiscoverForm({...discoverForm, credibility: value})}
+                            >
+                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
+                                <SelectValue placeholder="Select source type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
+                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
+                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="discover-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
+                            <Input
+                              id="discover-spatial"
+                              type="number"
+                              placeholder="e.g., 100"
+                              value={discoverForm.spatial_relevance_m}
+                              onChange={(e) => setDiscoverForm({...discoverForm, spatial_relevance_m: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
                           <div className="flex flex-col gap-4">
                             <Button
                               variant="outline"
                               onClick={() => setDiscoverForm({
+                                ...discoverForm,
                                 latitude: mapLocation.lat,
                                 longitude: mapLocation.lng,
                                 location_radius_m: 10000
@@ -2293,65 +2666,108 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                           </p>
                         </div>
 
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                           <div>
-                            <Label htmlFor="obs-title" className="text-gray-900">Observation Title *</Label>
+                            <Label htmlFor="obs-title" className="text-gray-900 mb-2 block">Observation Title *</Label>
                             <Input
                               id="obs-title"
                               placeholder="e.g., Fresh scarp on hillside"
                               value={observationForm.title}
                               onChange={(e) => setObservationForm({...observationForm, title: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
+                              className="bg-gray-100 border-gray-300 text-gray-900"
                             />
                           </div>
 
-                          <div className="grid grid-cols-2 gap-4">
-                            <div>
-                              <Label htmlFor="obs-lat" className="text-gray-900">Latitude *</Label>
-                              <Input
-                                id="obs-lat"
-                                type="number"
-                                step="0.0001"
-                                placeholder={mapLocation.lat.toFixed(4)}
-                                value={observationForm.latitude || ''}
-                                onChange={(e) => setObservationForm({...observationForm, latitude: parseFloat(e.target.value)})}
-                                className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
-                              />
-                            </div>
-                            <div>
-                              <Label htmlFor="obs-lon" className="text-gray-900">Longitude *</Label>
-                              <Input
-                                id="obs-lon"
-                                type="number"
-                                step="0.0001"
-                                placeholder={mapLocation.lng.toFixed(4)}
-                                value={observationForm.longitude || ''}
-                                onChange={(e) => setObservationForm({...observationForm, longitude: parseFloat(e.target.value)})}
-                                className="bg-gray-100 border-gray-300 text-gray-900 mt-2"
-                              />
-                            </div>
+                          <div>
+                            <Label htmlFor="obs-lat" className="text-gray-900 mb-2 block">Latitude *</Label>
+                            <Input
+                              id="obs-lat"
+                              type="number"
+                              step="0.0001"
+                              placeholder={mapLocation.lat.toFixed(4)}
+                              value={observationForm.latitude || ''}
+                              onChange={(e) => setObservationForm({...observationForm, latitude: parseFloat(e.target.value)})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
                           </div>
 
                           <div>
-                            <Label htmlFor="obs-sight" className="text-gray-900">What did you see?</Label>
+                            <Label htmlFor="obs-lon" className="text-gray-900 mb-2 block">Longitude *</Label>
+                            <Input
+                              id="obs-lon"
+                              type="number"
+                              step="0.0001"
+                              placeholder={mapLocation.lng.toFixed(4)}
+                              value={observationForm.longitude || ''}
+                              onChange={(e) => setObservationForm({...observationForm, longitude: parseFloat(e.target.value)})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                          </div>
+
+                          <div>
+                            <Label htmlFor="obs-sight" className="text-gray-900 mb-2 block">What did you see?</Label>
                             <Textarea
                               id="obs-sight"
                               placeholder="Describe visual observations... e.g., A fresh scarp about 2 meters high with exposed soil and tilted trees"
                               value={observationForm.observation_sight}
                               onChange={(e) => setObservationForm({...observationForm, observation_sight: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2 min-h-[80px]"
+                              className="bg-gray-100 border-gray-300 text-gray-900 min-h-[400px]"
                             />
                           </div>
 
                           <div>
-                            <Label htmlFor="obs-sound" className="text-gray-900">What did you hear?</Label>
+                            <Label htmlFor="obs-sound" className="text-gray-900 mb-2 block">What did you hear?</Label>
                             <Textarea
                               id="obs-sound"
                               placeholder="Describe auditory observations... e.g., Cracking sounds coming from the hillside"
                               value={observationForm.observation_sound}
                               onChange={(e) => setObservationForm({...observationForm, observation_sound: e.target.value})}
-                              className="bg-gray-100 border-gray-300 text-gray-900 mt-2 min-h-[80px]"
+                              className="bg-gray-100 border-gray-300 text-gray-900 min-h-[400px]"
                             />
+                          </div>
+
+                          <div>
+                            <Label htmlFor="obs-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
+                            <Input
+                              id="obs-recency"
+                              type="number"
+                              placeholder="e.g., 50"
+                              value={observationForm.recency_years}
+                              onChange={(e) => setObservationForm({...observationForm, recency_years: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="obs-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
+                            <Select
+                              value={observationForm.credibility}
+                              onValueChange={(value) => setObservationForm({...observationForm, credibility: value})}
+                            >
+                              <SelectTrigger className="bg-gray-100 border-gray-300 text-gray-900">
+                                <SelectValue placeholder="Select source type" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="0.4">Oral = 0.4</SelectItem>
+                                <SelectItem value="0.6">Historical = 0.6</SelectItem>
+                                <SelectItem value="0.9">Scientific = 0.9</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
+                          </div>
+
+                          <div>
+                            <Label htmlFor="obs-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
+                            <Input
+                              id="obs-spatial"
+                              type="number"
+                              placeholder="e.g., 100"
+                              value={observationForm.spatial_relevance_m}
+                              onChange={(e) => setObservationForm({...observationForm, spatial_relevance_m: e.target.value})}
+                              className="bg-gray-100 border-gray-300 text-gray-900"
+                            />
+                            <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
                           <div className="flex gap-4">
@@ -2460,6 +2876,33 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                       )}
                     </div> */}
               </div>
+
+              {/* Submit L Data Button */}
+              <div className="p-4 border-t border-gray-200">
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 w-full"
+                  onClick={handleSubmitLData}
+                  disabled={isSubmittingL}
+                >
+                  {isSubmittingL ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Submit Data
+                    </>
+                  )}
+                </Button>
+                {lDataSaved && (
+                  <p className="text-xs text-green-600 mt-2 text-center flex items-center justify-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Data saved
+                  </p>
+                )}
+              </div>
             </Card>
 
             {/* Card 3: V - Vulnerability */}
@@ -2472,8 +2915,53 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
               <div className="p-6 overflow-y-auto flex-1">
                 {renderVFactorForm()}
               </div>
+
+              {/* Submit V Data Button */}
+              <div className="p-4 border-t border-gray-200">
+                <Button
+                  className="bg-blue-600 hover:bg-blue-700 w-full"
+                  onClick={handleSubmitVData}
+                  disabled={isSubmittingV}
+                >
+                  {isSubmittingV ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4 mr-2" />
+                      Submit Data
+                    </>
+                  )}
+                </Button>
+                {vDataSaved && (
+                  <p className="text-xs text-green-600 mt-2 text-center flex items-center justify-center gap-1">
+                    <CheckCircle2 className="h-3 w-3" />
+                    Data saved
+                  </p>
+                )}
+              </div>
             </Card>
           </div>
+        </div>
+
+        {/* Calculate Risk Button Section */}
+        <div className="mt-2">
+          <Button
+            className="bg-blue-600 hover:bg-blue-700 mx-auto block"
+            onClick={handleCalculateRisk}
+            disabled={isCalculating}
+          >
+            {isCalculating ? (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                Calculating...
+              </>
+            ) : (
+              'Calculate Risk'
+            )}
+          </Button>
         </div>
 
         {/* Version History Dialog */}

@@ -54,10 +54,13 @@
             "@types/react": "^19.2.2",
             "@types/react-dom": "^19.2.2",
             "@vitejs/plugin-react-swc": "^3.10.2",
+            "concurrently": "^9.2.1",
             "vite": "6.3.5"
       },
       "scripts": {
             "dev": "vite",
-            "build": "vite build"
+            "build": "vite build",
+            "api": "python api_server.py",
+            "dev:all": "concurrently \"npm run dev\" \"npm run api\" --names \"frontend,api\" --prefix-colors \"cyan,magenta\""
       }
 }

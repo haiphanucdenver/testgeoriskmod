@@ -2,6 +2,7 @@ import { Switch } from "./ui/switch";
 import { Checkbox } from "./ui/checkbox";
 import { Slider } from "./ui/slider";
 import { Button } from "./ui/button";
+import { Input } from "./ui/input";
 import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
 import { ChevronDown, MapPin, Plus, Minus } from "lucide-react";
 import { useState, useEffect } from "react";
@@ -240,51 +241,69 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Rainfall
+              Rainfall
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {rainfallValue[0]}mm
-            </span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={rainfallValue[0]}
+                onChange={(e) => setRainfallValue([Math.max(0, Math.min(4000, Number(e.target.value) || 0))])}
+                min={0}
+                max={4000}
+                step={10}
+                className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+              />
+              <span className="text-sm text-gray-300">mm</span>
+            </div>
           </div>
           <div className="relative">
             <Slider
               value={rainfallValue}
               onValueChange={setRainfallValue}
-              max={200}
+              max={4000}
               min={0}
-              step={1}
+              step={10}
               className="w-full [&>span[data-slot=slider-track]]:bg-black [&>span[data-slot=slider-range]]:bg-white [&>span[data-slot=slider-thumb]]:bg-white [&>span[data-slot=slider-thumb]]:border-black [&>span[data-slot=slider-thumb]]:border-2"
             />
           </div>
           <div className="flex justify-between text-xs text-gray-400">
             <span>0</span>
-            <span>200</span>
+            <span>4000</span>
           </div>
         </div>
 
-        {/* Adjust Temperature */}
+        {/* Temperature */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Temperature
+              Temperature
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {temperatureValue[0] > 0 ? `+${temperatureValue[0]}` : temperatureValue[0]}°C
-            </span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={temperatureValue[0]}
+                onChange={(e) => setTemperatureValue([Math.max(-90, Math.min(60, Number(e.target.value) || 0))])}
+                min={-90}
+                max={60}
+                step={1}
+                className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+              />
+              <span className="text-sm text-gray-300">°C</span>
+            </div>
           </div>
           <div className="relative">
             <Slider
               value={temperatureValue}
               onValueChange={setTemperatureValue}
-              max={50}
-              min={-50}
+              max={60}
+              min={-90}
               step={1}
               className="w-full [&>span[data-slot=slider-track]]:bg-black [&>span[data-slot=slider-range]]:bg-white [&>span[data-slot=slider-thumb]]:bg-white [&>span[data-slot=slider-thumb]]:border-black [&>span[data-slot=slider-thumb]]:border-2"
             />
           </div>
           <div className="flex justify-between text-xs text-gray-400">
-            <span>-50</span>
-            <span>50</span>
+            <span>-90</span>
+            <span>60</span>
           </div>
         </div>
 
@@ -292,17 +311,26 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Wind Speed
+              Wind Speed
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {windSpeedValue[0]} km/h
-            </span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={windSpeedValue[0]}
+                onChange={(e) => setWindSpeedValue([Math.max(0, Math.min(500, Number(e.target.value) || 0))])}
+                min={0}
+                max={500}
+                step={1}
+                className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+              />
+              <span className="text-sm text-gray-300">km/h</span>
+            </div>
           </div>
           <div className="relative">
             <Slider
               value={windSpeedValue}
               onValueChange={setWindSpeedValue}
-              max={252}
+              max={500}
               min={0}
               step={1}
               className="w-full [&>span[data-slot=slider-track]]:bg-black [&>span[data-slot=slider-range]]:bg-white [&>span[data-slot=slider-thumb]]:bg-white [&>span[data-slot=slider-thumb]]:border-black [&>span[data-slot=slider-thumb]]:border-2"
@@ -310,7 +338,7 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
           </div>
           <div className="flex justify-between text-xs text-gray-400">
             <span>0</span>
-            <span>252</span>
+            <span>500</span>
           </div>
         </div>
 
@@ -318,11 +346,20 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Soil Depth
+              Soil Depth
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {soilDepthValue[0]} cm
-            </span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={soilDepthValue[0]}
+                onChange={(e) => setSoilDepthValue([Math.max(0, Math.min(500, Number(e.target.value) || 0))])}
+                min={0}
+                max={500}
+                step={1}
+                className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+              />
+              <span className="text-sm text-gray-300">cm</span>
+            </div>
           </div>
           <div className="relative">
             <Slider
@@ -344,11 +381,17 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Seismic Magnitude
+              Seismic Magnitude
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {seismicMagnitudeValue[0].toFixed(1)}
-            </span>
+            <Input
+              type="number"
+              value={seismicMagnitudeValue[0]}
+              onChange={(e) => setSeismicMagnitudeValue([Math.max(0, Math.min(10, Number(e.target.value) || 0))])}
+              min={0}
+              max={10}
+              step={0.1}
+              className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+            />
           </div>
           <div className="relative">
             <Slider
@@ -370,17 +413,26 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-sm text-gray-300">
-              Adjust Seismic Frequency
+              Seismic Frequency
             </label>
-            <span className="text-sm font-medium text-white bg-slate-700 px-2 py-1 rounded">
-              {seismicFrequencyValue[0]}/week
-            </span>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                value={seismicFrequencyValue[0]}
+                onChange={(e) => setSeismicFrequencyValue([Math.max(0, Math.min(365, Number(e.target.value) || 0))])}
+                min={0}
+                max={365}
+                step={1}
+                className="w-16 h-7 text-sm font-medium text-white bg-slate-700 border-slate-600 px-2 py-1"
+              />
+              <span className="text-sm text-gray-300">/week</span>
+            </div>
           </div>
           <div className="relative">
             <Slider
               value={seismicFrequencyValue}
               onValueChange={setSeismicFrequencyValue}
-              max={50}
+              max={365}
               min={0}
               step={1}
               className="w-full [&>span[data-slot=slider-track]]:bg-black [&>span[data-slot=slider-range]]:bg-white [&>span[data-slot=slider-thumb]]:bg-white [&>span[data-slot=slider-thumb]]:border-black [&>span[data-slot=slider-thumb]]:border-2"
@@ -388,7 +440,7 @@ export function LeftSidebar({ layers, onLayerToggle, mapLocation, areaSelectionM
           </div>
           <div className="flex justify-between text-xs text-gray-400">
             <span>0</span>
-            <span>50</span>
+            <span>365</span>
           </div>
         </div>
 

@@ -47,8 +47,8 @@ export function MapView({ layers, searchLocation, onLocationChange, areaSelectio
     infrastructure: mapboxgl.Popup[];
     population: mapboxgl.Popup[];
   }>({ risk: [], infrastructure: [], population: [] });
-  const [lng, setLng] = useState(-122.7);
-  const [lat, setLat] = useState(45.3);
+  const [lng, setLng] = useState(-75.3222); // Nevado del Ruiz, Colombia
+  const [lat, setLat] = useState(4.8925); // Nevado del Ruiz, Colombia
   const [zoom, setZoom] = useState(10);
   const [currentElevation, setCurrentElevation] = useState(1250);
   const [infrastructureData, setInfrastructureData] = useState<InfrastructurePoint[]>([]);
@@ -189,11 +189,11 @@ export function MapView({ layers, searchLocation, onLocationChange, areaSelectio
             'interpolate',
             ['linear'],
             ['get', 'riskScore'], // Use normalized 0-1 score
-            0, '#22c55e',    // Green (low risk)
-            0.33, '#84cc16', // Light green
-            0.5, '#eab308',  // Yellow (medium risk)
-            0.66, '#f59e0b', // Orange
-            1, '#ef4444',    // Red (high risk)
+            0, '#2D6A4F',    // Low Risk - Green
+            0.30, '#FFD60A', // Medium Risk - Yellow
+            0.60, '#FF9F1C', // High Risk - Orange
+            0.80, '#D00000', // Severe Risk - Red
+            1, '#D00000',    // Severe Risk - Red
           ],
           'fill-opacity': 0.5,
         },
@@ -1038,16 +1038,20 @@ export function MapView({ layers, searchLocation, onLocationChange, areaSelectio
         <div className="absolute top-20 right-4 bg-black/70 text-white p-3 rounded text-xs backdrop-blur-sm z-10 space-y-2">
           <div className="font-semibold mb-2">Risk Level</div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-red-500"></div>
-            <span>High (0.66 - 1.0)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#D00000' }}></div>
+            <span>Severe (0.80 - 1.00)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-yellow-500"></div>
-            <span>Medium (0.33 - 0.66)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#FF9F1C' }}></div>
+            <span>High (0.60 - 0.80)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-4 h-4 rounded bg-green-500"></div>
-            <span>Low (0 - 0.33)</span>
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#FFD60A' }}></div>
+            <span>Medium (0.30 - 0.60)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-4 rounded" style={{ backgroundColor: '#2D6A4F' }}></div>
+            <span>Low (0 - 0.30)</span>
           </div>
           {riskData && (
             <div className="mt-3 pt-2 border-t border-white/20">

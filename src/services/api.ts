@@ -3,7 +3,8 @@
  * Handles all communication with the backend REST API
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+// Hardcoded API URL for LightSail deployment
+const API_BASE_URL = 'http://100.26.170.156:8001';
 
 /**
  * Generic fetch wrapper with error handling
@@ -96,115 +97,177 @@ export const eventAPI = {
    * Get all events
    */
   getAll: () => fetchAPI<{ count: number; events: Event[] }>('/api/events'),
-  
+
   /**
    * Create a new event
    */
-  create: (event: Omit<Event, 'event_id'>) => 
+  create: (event: Omit<Event, 'event_id'>) =>
     fetchAPI<{ event_id: number; message: string }>('/api/events', {
       method: 'POST',
       body: JSON.stringify(event),
     }),
 };
 
-// ===== VULNERABILITY API =====
+// ===== H FACTOR API =====
 
-export interface Vulnerability {
-  vulnerability_id?: number;
-  location_id: number;
-  asset_type: string;
-  num_buildings: number;
-  location_name?: string;
+export interface HFactorData {
+  // Location data
+  location_name: string;
+  latitude: number;
+  longitude: number;
+  location_description?: string;
+  region?: string;
+
+  // Event data
+  hazard_type?: string;
+  date_observed: string;
+
+  // H Factor - Terrain data (for event table)
+  slope_angle?: number;
+  curvature_number?: number;
+  lithology_type?: string;
+  lithology_level?: number;
+
+  // H Factor - Rainfall data (for dynamic_trigger table)
+  rainfall_intensity_mm_hr?: number;
+  rainfall_duration_hrs?: number;
+  rainfall_exceedance?: number;
 }
 
-export const vulnerabilityAPI = {
+export const hFactorAPI = {
   /**
-   * Get all vulnerability records
+   * Submit H Factor data to the database
+   * Creates location, event, and dynamic_trigger records
    */
-  getAll: () => fetchAPI<{ count: number; vulnerabilities: Vulnerability[] }>('/api/vulnerabilities'),
-  
-  /**
-   * Create a new vulnerability record
-   */
-  create: (vuln: Omit<Vulnerability, 'vulnerability_id'>) => 
-    fetchAPI<{ vulnerability_id: number; message: string }>('/api/vulnerabilities', {
+  submit: (data: HFactorData) =>
+    fetchAPI<{
+      success: boolean;
+      message: string;
+      location_id: number;
+      event_id: number;
+      trigger_id: number | null;
+    }>('/api/h-factor', {
       method: 'POST',
-      body: JSON.stringify(vuln),
+      body: JSON.stringify(data),
     }),
 };
 
-// ===== LOCAL LORE API =====
+// ===== L FACTOR API =====
 
-export interface LocalLore {
-  lore_id?: number;
-  location_id: number;
-  lore_narrative: string;
-  location_name?: string;
+export interface LFactorStoryData {
+  // Location data
+  location_name: string;
+  latitude: number;
+  longitude: number;
+  location_description?: string;
+  region?: string;
+
+  // L Factor - Story data
+  title: string;  // Maps to source_title
+  story: string;  // Maps to lore_narrative
+  location_place: string;  // Maps to place_name
+  years_ago?: number;  // Recency in years ago (saved directly to years_ago column)
+  credibility: string;  // eyewitness, instrumented, oral-tradition, newspaper, expert
+  spatial_accuracy: string;  // exact, approximate, general-area
 }
 
-export const localLoreAPI = {
+export const lFactorAPI = {
   /**
-   * Get all local lore records
+   * Submit L Factor story data to the database
+   * Creates location and local_lore records with proper column mapping
    */
-  getAll: () => fetchAPI<{ count: number; lore: LocalLore[] }>('/api/local-lore'),
-  
-  /**
-   * Create a new local lore record
-   */
-  create: (lore: Omit<LocalLore, 'lore_id'>) => 
-    fetchAPI<{ lore_id: number; message: string }>('/api/local-lore', {
+  submitStory: (data: LFactorStoryData) =>
+    fetchAPI<{
+      success: boolean;
+      message: string;
+      location_id: number;
+      lore_id: number;
+      years_ago: number | null;
+      credibility_confidence: number;
+      distance_to_report_location: number;
+    }>('/api/l-factor-story', {
       method: 'POST',
-      body: JSON.stringify(lore),
+      body: JSON.stringify(data),
     }),
-};
 
-// ===== HISTORICAL EVENTS API =====
+  /**
+   * Get all L Factor stories from the database
+   * Returns stories with proper column mapping from local_lore table
+   */
+  getAll: () =>
+    fetchAPI<{
+      count: number;
+      events: Array<{
+        id: string;
+        eventType: string;
+        date: string;
+        location: string;
+        description: string;
+        source: string;
+        credibility: string;
+        spatialAccuracy: string;
+        created_at: string | null;
+      }>;
+    }>('/api/l-factor-stories'),
 
-export interface HistoricalEvent {
-  id: string;
-  location_id?: number;
-  eventType: string;
-  date: string;
-  location: string;
-  description: string;
-  source: string;
-  credibility: 'eyewitness' | 'instrumented' | 'oral-tradition' | 'newspaper' | 'expert';
-  spatialAccuracy: 'exact' | 'approximate' | 'general-area';
-  created_at?: string;
-}
-
-export const historicalEventAPI = {
   /**
-   * Get all historical events
+   * Delete a L Factor story from the database
    */
-  getAll: () => fetchAPI<{ count: number; events: HistoricalEvent[] }>('/api/historical-events'),
-  
-  /**
-   * Create a new historical event
-   */
-  create: (event: Omit<HistoricalEvent, 'id' | 'created_at'>) => 
-    fetchAPI<{ id: number; message: string; data: any }>('/api/historical-events', {
-      method: 'POST',
-      body: JSON.stringify(event),
-    }),
-  
-  /**
-   * Update an existing historical event
-   */
-  update: (id: string, event: Omit<HistoricalEvent, 'id' | 'created_at'>) => 
-    fetchAPI<{ id: number; message: string; data: any }>(`/api/historical-events/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(event),
-    }),
-  
-  /**
-   * Delete a historical event
-   */
-  delete: (id: string) => 
-    fetchAPI<{ message: string }>(`/api/historical-events/${id}`, {
+  delete: (loreId: string | number) =>
+    fetchAPI<{ message: string }>(`/api/l-factor-stories/${loreId}`, {
       method: 'DELETE',
     }),
+
+  /**
+   * Update a L Factor story in the database
+   * Updates location and all story fields with proper column mapping
+   */
+  update: (loreId: string | number, data: LFactorStoryData) =>
+    fetchAPI<{
+      success: boolean;
+      message: string;
+      lore_id: number;
+      location_id: number;
+    }>(`/api/l-factor-stories/${loreId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
 };
+
+// ===== V FACTOR API =====
+
+export interface VFactorData {
+  // Location data
+  location_name: string;
+  latitude: number;
+  longitude: number;
+  location_description?: string;
+  region?: string;
+
+  // V Factor - Vulnerability data
+  exposure_score: number;  // 0-1
+  fragility_score: number;  // 0-1
+  criticality_score?: number;  // 0-1
+  population_density?: number;  // people/km²
+}
+
+export const vFactorAPI = {
+  /**
+   * Submit V Factor data to the database
+   * Creates location and vulnerability records
+   */
+  submit: (data: VFactorData) =>
+    fetchAPI<{
+      success: boolean;
+      message: string;
+      location_id: number;
+      vulnerability_id: number;
+    }>('/api/v-factor', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+};
+
 
 // ===== RISK API =====
 
@@ -519,6 +582,66 @@ export const loreAPI = {
   },
 };
 
+// ===== RISK CALCULATION API =====
+
+export interface RiskCalculationRequest {
+  // H Factor inputs
+  slope_deg: number;
+  curvature: number;
+  lith_class: number;  // 1-5 scale
+  rain_exceed: number; // 0-1
+
+  // L Factor inputs
+  lore_signal?: number; // 0-1, default 0
+
+  // V Factor inputs
+  exposure: number;    // 0-1
+  fragility: number;   // 0-1
+  criticality_weight?: number;
+
+  // Configuration
+  hazard_type?: string;
+  event_type?: string;
+  location_lat?: number;
+  location_lng?: number;
+  date_observed?: string;
+}
+
+export interface RiskCalculationResult {
+  R_score: number;
+  R_std: number;
+  R_p05: number;         // 5th percentile (lower confidence bound)
+  R_p95: number;         // 95th percentile (upper confidence bound)
+  H_score: number;
+  L_score: number;
+  V_score: number;
+  H_sensitivity: number; // Variance contribution from H (0-1)
+  L_sensitivity: number; // Variance contribution from L (0-1)
+  V_sensitivity: number; // Variance contribution from V (0-1)
+  risk_level: string;
+  gate_passed: boolean;
+  location?: {
+    latitude: number;
+    longitude: number;
+  };
+  date_observed?: string;
+  event_type?: string;
+}
+
+export const riskCalculationAPI = {
+  /**
+   * Calculate risk score from H, L, V factor inputs
+   */
+  calculate: (data: RiskCalculationRequest) =>
+    fetchAPI<{ success: boolean; message: string; data: RiskCalculationResult }>(
+      '/api/calculate-risk',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    ),
+};
+
 // ===== ERROR HANDLING UTILITIES =====
 
 /**
@@ -548,13 +671,14 @@ export default {
   healthCheck,
   locationAPI,
   eventAPI,
-  vulnerabilityAPI,
-  localLoreAPI,
-  historicalEventAPI,
   riskAPI,
   statisticsAPI,
   dataSourceAPI,
   loreAPI,
+  riskCalculationAPI,
+  hFactorAPI,
+  lFactorAPI,
+  vFactorAPI,
   getErrorMessage,
   checkAPIConnection,
 };

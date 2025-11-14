@@ -156,41 +156,128 @@ def mc_uncertainty(
     L: float,
     V: float,
     config: RiskConfig,
-    n_samples: int = 60,
-    sigma: float = 0.04
-) -> Tuple[float, float]:
+    n_samples: int = 300,
+    sigma_H: float = 0.05,
+    sigma_L: float = 0.08,
+    sigma_V: float = 0.04,
+    correlation: Optional[np.ndarray] = None
+) -> Dict[str, float]:
     """
-    Estimate uncertainty using Monte Carlo sampling
+    Advanced uncertainty estimation using Monte Carlo sampling with input-specific
+    uncertainties, confidence intervals, and sensitivity analysis
 
     Args:
         H: Event driver score (0-1)
         L: Local lore score (0-1)
         V: Vulnerability score (0-1)
         config: Risk configuration
-        n_samples: Number of Monte Carlo samples
-        sigma: Standard deviation of noise to inject
+        n_samples: Number of Monte Carlo samples (default 300 for better convergence)
+        sigma_H: Standard deviation for H uncertainty (default 0.05 - physical measurements)
+        sigma_L: Standard deviation for L uncertainty (default 0.08 - lore is more uncertain)
+        sigma_V: Standard deviation for V uncertainty (default 0.04 - survey-based)
+        correlation: Optional 3x3 correlation matrix for H, L, V
 
     Returns:
-        Tuple of (R_mean, R_std)
-        - R_mean: Mean risk score
-        - R_std: Standard deviation of risk score
+        Dict with:
+            - R_mean: Mean risk score
+            - R_std: Standard deviation of risk score
+            - R_p05: 5th percentile (lower confidence bound)
+            - R_p95: 95th percentile (upper confidence bound)
+            - H_sensitivity: Variance contribution from H uncertainty
+            - L_sensitivity: Variance contribution from L uncertainty
+            - V_sensitivity: Variance contribution from V uncertainty
     """
-    samples = []
+    # Store samples for full distribution analysis
+    R_samples = []
 
-    for _ in range(n_samples):
-        # Add Gaussian noise to each factor
-        H_sample = np.clip(H + np.random.normal(0, sigma), 0, 1)
-        L_sample = np.clip(L + np.random.normal(0, sigma), 0, 1)
-        V_sample = np.clip(V + np.random.normal(0, sigma), 0, 1)
+    # For sensitivity analysis: track variance contributions
+    R_samples_H_only = []
+    R_samples_L_only = []
+    R_samples_V_only = []
+
+    for i in range(n_samples):
+        # Generate correlated or uncorrelated noise
+        if correlation is not None:
+            # Use Cholesky decomposition for correlated sampling
+            try:
+                L_chol = np.linalg.cholesky(correlation)
+                uncorrelated = np.random.normal(0, 1, 3)
+                correlated = L_chol @ uncorrelated
+                noise_H = correlated[0] * sigma_H
+                noise_L = correlated[1] * sigma_L
+                noise_V = correlated[2] * sigma_V
+            except np.linalg.LinAlgError:
+                # Fallback to uncorrelated if matrix is not positive definite
+                noise_H = np.random.normal(0, sigma_H)
+                noise_L = np.random.normal(0, sigma_L)
+                noise_V = np.random.normal(0, sigma_V)
+        else:
+            # Independent Gaussian noise with input-specific uncertainties
+            noise_H = np.random.normal(0, sigma_H)
+            noise_L = np.random.normal(0, sigma_L)
+            noise_V = np.random.normal(0, sigma_V)
+
+        # Add noise and clip to valid [0,1] range
+        H_sample = np.clip(H + noise_H, 0, 1)
+        L_sample = np.clip(L + noise_L, 0, 1)
+        V_sample = np.clip(V + noise_V, 0, 1)
 
         # Compute risk for this sample
         R_sample, _ = borromean_score(H_sample, L_sample, V_sample, config)
-        samples.append(R_sample)
+        R_samples.append(R_sample)
 
-    R_mean = float(np.mean(samples))
-    R_std = float(np.std(samples))
+        # Sensitivity analysis: perturb one factor at a time
+        if i < n_samples // 3:
+            # Vary only H
+            R_h, _ = borromean_score(H_sample, L, V, config)
+            R_samples_H_only.append(R_h)
 
-    return R_mean, R_std
+            # Vary only L
+            R_l, _ = borromean_score(H, L_sample, V, config)
+            R_samples_L_only.append(R_l)
+
+            # Vary only V
+            R_v, _ = borromean_score(H, L, V_sample, config)
+            R_samples_V_only.append(R_v)
+
+    # Convert to numpy array for statistics
+    R_array = np.array(R_samples)
+
+    # Central statistics
+    R_mean = float(np.mean(R_array))
+    R_std = float(np.std(R_array))
+
+    # Confidence intervals (credible intervals for risk)
+    R_p05 = float(np.percentile(R_array, 5))
+    R_p95 = float(np.percentile(R_array, 95))
+
+    # Sensitivity analysis: variance contribution from each factor
+    # Using variance decomposition
+    var_total = np.var(R_array)
+    var_H = np.var(R_samples_H_only) if R_samples_H_only else 0.0
+    var_L = np.var(R_samples_L_only) if R_samples_L_only else 0.0
+    var_V = np.var(R_samples_V_only) if R_samples_V_only else 0.0
+
+    # Normalize to sum to 1 (Sobol-style indices)
+    total_var = var_H + var_L + var_V
+    if total_var > 0:
+        H_sensitivity = float(var_H / total_var)
+        L_sensitivity = float(var_L / total_var)
+        V_sensitivity = float(var_V / total_var)
+    else:
+        H_sensitivity = 0.33
+        L_sensitivity = 0.33
+        V_sensitivity = 0.34
+
+    return {
+        'R_mean': R_mean,
+        'R_std': R_std,
+        'R_p05': R_p05,
+        'R_p95': R_p95,
+        'H_sensitivity': H_sensitivity,
+        'L_sensitivity': L_sensitivity,
+        'V_sensitivity': V_sensitivity,
+    }
 
 
 def calculate_risk(
@@ -244,31 +331,54 @@ def calculate_risk(
     # Compute risk score
     R, gate_passed = borromean_score(H, L, V, config)
 
-    # Compute uncertainty if requested
-    R_std = 0.0
-    if compute_uncertainty:
-        R_mean, R_std = mc_uncertainty(H, L, V, config, n_samples=60, sigma=0.04)
-        # Use uncertainty-adjusted mean
-        R = R_mean
+    # Initialize uncertainty metrics
+    uncertainty_metrics = {
+        'R_std': 0.0,
+        'R_p05': 0.0,
+        'R_p95': 0.0,
+        'H_sensitivity': 0.0,
+        'L_sensitivity': 0.0,
+        'V_sensitivity': 0.0,
+    }
 
-    # Determine risk level
-    if R >= 0.7:
-        risk_level = "very-high"
-    elif R >= 0.5:
+    # Compute advanced uncertainty if requested
+    if compute_uncertainty:
+        # Use input-specific uncertainties
+        # H: 0.05 (physical measurements - moderate uncertainty)
+        # L: 0.08 (lore/historical - higher uncertainty)
+        # V: 0.04 (survey-based - lower uncertainty)
+        uncertainty = mc_uncertainty(
+            H, L, V, config,
+            n_samples=300,
+            sigma_H=0.05,
+            sigma_L=0.08,
+            sigma_V=0.04
+        )
+        # Use uncertainty-adjusted mean
+        R = uncertainty['R_mean']
+        uncertainty_metrics = uncertainty
+
+    # Determine risk level based on 4-tier system
+    if R >= 0.8:
+        risk_level = "severe"
+    elif R >= 0.6:
         risk_level = "high"
     elif R >= 0.3:
         risk_level = "medium"
-    elif R >= 0.1:
-        risk_level = "low"
     else:
-        risk_level = "very-low"
+        risk_level = "low"
 
     return {
         "H_score": round(H, 4),
         "L_score": round(L, 4),
         "V_score": round(V, 4),
         "R_score": round(R, 4),
-        "R_std": round(R_std, 4),
+        "R_std": round(uncertainty_metrics['R_std'], 4),
+        "R_p05": round(uncertainty_metrics['R_p05'], 4),
+        "R_p95": round(uncertainty_metrics['R_p95'], 4),
+        "H_sensitivity": round(uncertainty_metrics['H_sensitivity'], 4),
+        "L_sensitivity": round(uncertainty_metrics['L_sensitivity'], 4),
+        "V_sensitivity": round(uncertainty_metrics['V_sensitivity'], 4),
         "risk_level": risk_level,
         "gate_passed": gate_passed,
         "config": {
