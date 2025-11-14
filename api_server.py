@@ -1764,211 +1764,326 @@ async def ai_agent_search_observation(observation_sight: str, observation_sound:
 async def submit_lore_story(request: SubmitStoryRequest):
     """
     Scenario 1: User provides a story/lore with title and optional location
-    The story text or file will be analyzed by AI agent to extract:
-    - Recency (when did it happen?)
-    - Spatial information (where did it happen?)
-    - Credibility score
+    The story text will be analyzed by extraction_agent AI to extract:
+    - Recency (when did it happen?)  -> l1_recency_score
+    - Credibility (source reliability) -> l2_credibility_score
+    - Spatial information (where) -> l3_spatial_score
+    - Overall L_Score calculated and saved to local_lore table
     """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Insert story into database
-            cur.execute("""
-                INSERT INTO lore_stories (
-                    area_id, title, story_text, file_path,
-                    latitude, longitude, location_description,
-                    scenario_type, ai_status, created_by, created_at
-                )
-                VALUES (%(area_id)s, %(title)s, %(story_text)s, %(file_path)s,
-                        %(latitude)s, %(longitude)s, %(location_description)s,
-                        'user_story', 'pending', %(created_by)s, CURRENT_TIMESTAMP)
-                RETURNING story_id
-            """, {
-                'area_id': request.area_id,
-                'title': request.title,
-                'story_text': request.story_text,
-                'file_path': request.file_path,
-                'latitude': request.latitude,
-                'longitude': request.longitude,
-                'location_description': request.location_description,
-                'created_by': request.created_by
-            })
+            # Call extraction agent to analyze the story
+            extraction_request = ExtractionRequest(
+                text=request.story_text or "",
+                location_context=request.location_description,
+                current_date=datetime.now()
+            )
 
-            story_id = cur.fetchone()['story_id']
+            results = await extraction_agent.extract_from_text(extraction_request)
 
-            # Create AI job for story analysis
-            cur.execute("""
-                INSERT INTO lore_ai_jobs (
-                    story_id, job_type, status, input_params, queued_at
-                )
-                VALUES (%(story_id)s, 'analyze_story', 'queued',
-                        %(input_params)s::jsonb, CURRENT_TIMESTAMP)
-                RETURNING job_id
-            """, {
-                'story_id': story_id,
-                'input_params': json.dumps({
-                    'story_text': request.story_text,
-                    'file_path': request.file_path,
-                    'title': request.title
+            if not results or len(results) == 0:
+                raise HTTPException(status_code=400, detail="AI agent could not extract any lore data from the story")
+
+            # Take the first (most relevant) extraction
+            extraction = results[0]
+
+            # Create or get location
+            if request.latitude and request.longitude:
+                location_name = request.location_description or extraction.place_name or "Unnamed Location"
+
+                cur.execute("""
+                    INSERT INTO location (name, latitude, longitude, description)
+                    VALUES (%(name)s, %(latitude)s, %(longitude)s, %(description)s)
+                    ON CONFLICT (name, latitude, longitude)
+                    DO UPDATE SET description = %(description)s
+                    RETURNING location_id
+                """, {
+                    'name': location_name,
+                    'latitude': request.latitude,
+                    'longitude': request.longitude,
+                    'description': request.location_description or extraction.event_narrative[:200]
                 })
+
+                location_id = cur.fetchone()['location_id']
+            else:
+                # Create a default location if not provided
+                cur.execute("""
+                    INSERT INTO location (name, latitude, longitude, description)
+                    VALUES (%(name)s, 0, 0, %(description)s)
+                    RETURNING location_id
+                """, {
+                    'name': extraction.place_name or "Unknown Location",
+                    'description': 'Location from AI extraction - coordinates need to be updated'
+                })
+                location_id = cur.fetchone()['location_id']
+
+            # Convert source_type enum to string for database
+            source_type_str = extraction.source_type.value if hasattr(extraction.source_type, 'value') else str(extraction.source_type)
+
+            # Insert into local_lore table with all AI-extracted fields and scores
+            cur.execute("""
+                INSERT INTO local_lore (
+                    location_id,
+                    lore_narrative,
+                    place_name,
+                    event_location_name,
+                    source_type,
+                    source_title,
+                    source_url,
+                    source_author,
+                    event_date,
+                    event_date_uncertainty_year,
+                    years_ago,
+                    distance_to_report_location,
+                    confidence_band,
+                    spatial_confidence,
+                    temporal_confidence,
+                    credibility_confidence,
+                    l1_recency_score,
+                    l2_credibility_score,
+                    l3_spatial_score,
+                    l_score,
+                    created_date
+                )
+                VALUES (
+                    %(location_id)s,
+                    %(lore_narrative)s,
+                    %(place_name)s,
+                    %(event_location_name)s,
+                    %(source_type)s,
+                    %(source_title)s,
+                    %(source_url)s,
+                    %(source_author)s,
+                    %(event_date)s,
+                    %(event_date_uncertainty_year)s,
+                    %(years_ago)s,
+                    %(distance_to_report_location)s,
+                    %(confidence_band)s,
+                    %(spatial_confidence)s,
+                    %(temporal_confidence)s,
+                    %(credibility_confidence)s,
+                    %(l1_recency_score)s,
+                    %(l2_credibility_score)s,
+                    %(l3_spatial_score)s,
+                    %(l_score)s,
+                    CURRENT_TIMESTAMP
+                )
+                RETURNING lore_id
+            """, {
+                'location_id': location_id,
+                'lore_narrative': extraction.event_narrative,
+                'place_name': extraction.place_name,
+                'event_location_name': extraction.place_name,
+                'source_type': source_type_str,
+                'source_title': request.title or extraction.source_title,
+                'source_url': extraction.source_url,
+                'source_author': extraction.source_author,
+                'event_date': extraction.event_date,
+                'event_date_uncertainty_year': extraction.event_date_uncertainty_years or 0,
+                'years_ago': int(extraction.years_ago) if extraction.years_ago else None,
+                'distance_to_report_location': extraction.distance_to_report,
+                'confidence_band': 'high' if (extraction.confidence_band or 0) > 0.7 else 'medium' if (extraction.confidence_band or 0) > 0.4 else 'low',
+                'spatial_confidence': extraction.spatial_score,
+                'temporal_confidence': extraction.recent_score,
+                'credibility_confidence': extraction.credibility_score,
+                'l1_recency_score': extraction.recent_score,
+                'l2_credibility_score': extraction.credibility_score,
+                'l3_spatial_score': extraction.spatial_score,
+                'l_score': extraction.l_score
             })
 
-            job_id = cur.fetchone()['job_id']
+            lore_id = cur.fetchone()['lore_id']
             conn.commit()
 
-            # PLACEHOLDER: Call AI agent to analyze story
-            # In production, this would be an async task/queue
-            try:
-                # Update job status to running
-                cur.execute("""
-                    UPDATE lore_ai_jobs
-                    SET status = 'running', started_at = CURRENT_TIMESTAMP
-                    WHERE job_id = %(job_id)s
-                """, {'job_id': job_id})
-                conn.commit()
-
-                # Call AI agent (real implementation)
-                ai_results = await ai_agent_analyze_story(
-                    story_id,
-                    request.story_text or "",
-                    request.file_path
-                )
-
-                # Update story with AI results
-                cur.execute("""
-                    UPDATE lore_stories
-                    SET ai_status = 'completed',
-                        ai_processed_at = CURRENT_TIMESTAMP,
-                        ai_event_date = %(ai_event_date)s,
-                        ai_event_type = %(ai_event_type)s,
-                        ai_recency_score = %(ai_recency_score)s,
-                        ai_spatial_relevance = %(ai_spatial_relevance)s,
-                        ai_credibility_score = %(ai_credibility_score)s,
-                        ai_confidence = %(ai_confidence)s,
-                        ai_summary = %(ai_summary)s,
-                        ai_extracted_locations = %(ai_extracted_locations)s::jsonb,
-                        last_modified = CURRENT_TIMESTAMP
-                    WHERE story_id = %(story_id)s
-                """, {
-                    'story_id': story_id,
-                    **ai_results
-                })
-
-                # Update job status to completed
-                cur.execute("""
-                    UPDATE lore_ai_jobs
-                    SET status = 'completed',
-                        completed_at = CURRENT_TIMESTAMP,
-                        output_results = %(output_results)s::jsonb
-                    WHERE job_id = %(job_id)s
-                """, {
-                    'job_id': job_id,
-                    'output_results': json.dumps(ai_results)
-                })
-
-                conn.commit()
-
-            except Exception as ai_error:
-                # Mark job as failed
-                cur.execute("""
-                    UPDATE lore_ai_jobs
-                    SET status = 'failed', error_message = %(error)s
-                    WHERE job_id = %(job_id)s
-                """, {'job_id': job_id, 'error': str(ai_error)})
-
-                cur.execute("""
-                    UPDATE lore_stories
-                    SET ai_status = 'failed', ai_error_message = %(error)s
-                    WHERE story_id = %(story_id)s
-                """, {'story_id': story_id, 'error': str(ai_error)})
-
-                conn.commit()
-
-                return {
-                    "story_id": story_id,
-                    "job_id": job_id,
-                    "message": "Story submitted but AI analysis failed",
-                    "ai_status": "failed",
-                    "error": str(ai_error)
-                }
-
             return {
-                "story_id": story_id,
-                "job_id": job_id,
+                "lore_id": lore_id,
+                "location_id": location_id,
                 "message": "Story submitted and analyzed successfully",
                 "ai_status": "completed",
-                "ai_results": ai_results
+                "l_score": extraction.l_score,
+                "ai_results": {
+                    "event_narrative": extraction.event_narrative,
+                    "place_name": extraction.place_name,
+                    "event_date": extraction.event_date.isoformat() if extraction.event_date else None,
+                    "years_ago": extraction.years_ago,
+                    "source_type": source_type_str,
+                    "l1_recency_score": extraction.recent_score,
+                    "l2_credibility_score": extraction.credibility_score,
+                    "l3_spatial_score": extraction.spatial_score,
+                    "l_score": extraction.l_score,
+                    "confidence": extraction.confidence_band
+                }
             }
 
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error processing story: {str(e)}")
     finally:
         conn.close()
 
 @app.post("/api/lore/discover-at-location")
 async def discover_lore_at_location(request: DiscoverLoreRequest):
     """
-    Scenario 2: AI finds lore at a given location
+    Scenario 2: AI discovers lore at a given location using research_agent
     AI searches historical databases, news archives, indigenous knowledge, etc.
+    Saves results to local_lore table with calculated L_Score
     """
     conn = get_conn()
     try:
-        # Call AI agent to discover lore (real implementation)
-        ai_results = await ai_agent_discover_lore(
-            request.latitude,
-            request.longitude,
-            request.location_radius_m
-        )
-
-        # Store discovered stories
-        story_ids = []
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            for found_story in ai_results.get('found_stories', []):
-                # Insert discovered story
+            # Create a location string for research (lat, lon)
+            location_str = f"{request.latitude:.6f}, {request.longitude:.6f}"
+
+            # Create research query using research_agent
+            query = ResearchQuery(
+                location=location_str,
+                hazard_type=None,  # Search all hazard types
+                time_range_years=100,  # Look back 100 years
+                include_indigenous_knowledge=True,
+                max_sources=10
+            )
+
+            # Call the real research agent
+            result = await research_agent.conduct_research(query)
+
+            if not result.findings or len(result.findings) == 0:
+                return {
+                    "message": "No lore discovered at this location",
+                    "lore_ids": [],
+                    "location": {
+                        "latitude": request.latitude,
+                        "longitude": request.longitude,
+                        "radius_m": request.location_radius_m
+                    },
+                    "ai_results": {
+                        "summary": "No historical events or lore found for this location"
+                    }
+                }
+
+            # Create or get location
+            location_name = f"Location ({request.latitude:.4f}, {request.longitude:.4f})"
+
+            cur.execute("""
+                INSERT INTO location (name, latitude, longitude, description)
+                VALUES (%(name)s, %(latitude)s, %(longitude)s, %(description)s)
+                ON CONFLICT (name, latitude, longitude)
+                DO UPDATE SET description = %(description)s
+                RETURNING location_id
+            """, {
+                'name': location_name,
+                'latitude': request.latitude,
+                'longitude': request.longitude,
+                'description': f'AI-discovered location within {request.location_radius_m}m radius'
+            })
+
+            location_id = cur.fetchone()['location_id']
+
+            # Store each discovered lore finding in local_lore table
+            lore_ids = []
+            for finding in result.findings:
+                # Convert source_type enum to string
+                source_type_str = finding.source_type.value if hasattr(finding.source_type, 'value') else str(finding.source_type)
+
                 cur.execute("""
-                    INSERT INTO lore_stories (
-                        area_id, title, story_text,
-                        latitude, longitude, location_radius_m,
-                        scenario_type, ai_status,
-                        ai_event_date, ai_event_type,
-                        ai_recency_score, ai_spatial_relevance, ai_credibility_score,
-                        ai_processed_at, created_by, created_at
+                    INSERT INTO local_lore (
+                        location_id,
+                        lore_narrative,
+                        place_name,
+                        event_location_name,
+                        source_type,
+                        source_title,
+                        source_url,
+                        source_author,
+                        event_date,
+                        event_date_uncertainty_year,
+                        years_ago,
+                        distance_to_report_location,
+                        confidence_band,
+                        spatial_confidence,
+                        temporal_confidence,
+                        credibility_confidence,
+                        l1_recency_score,
+                        l2_credibility_score,
+                        l3_spatial_score,
+                        l_score,
+                        created_date
                     )
-                    VALUES (%(area_id)s, %(title)s, %(story_text)s,
-                            %(latitude)s, %(longitude)s, %(location_radius_m)s,
-                            'ai_discovered', 'completed',
-                            %(ai_event_date)s, %(ai_event_type)s,
-                            %(ai_recency_score)s, %(ai_spatial_relevance)s, %(ai_credibility_score)s,
-                            CURRENT_TIMESTAMP, %(created_by)s, CURRENT_TIMESTAMP)
-                    RETURNING story_id
+                    VALUES (
+                        %(location_id)s,
+                        %(lore_narrative)s,
+                        %(place_name)s,
+                        %(event_location_name)s,
+                        %(source_type)s,
+                        %(source_title)s,
+                        %(source_url)s,
+                        %(source_author)s,
+                        %(event_date)s,
+                        %(event_date_uncertainty_year)s,
+                        %(years_ago)s,
+                        %(distance_to_report_location)s,
+                        %(confidence_band)s,
+                        %(spatial_confidence)s,
+                        %(temporal_confidence)s,
+                        %(credibility_confidence)s,
+                        %(l1_recency_score)s,
+                        %(l2_credibility_score)s,
+                        %(l3_spatial_score)s,
+                        %(l_score)s,
+                        CURRENT_TIMESTAMP
+                    )
+                    RETURNING lore_id
                 """, {
-                    'area_id': request.area_id,
-                    'title': found_story['title'],
-                    'story_text': found_story.get('story_text', ''),
-                    'latitude': request.latitude,
-                    'longitude': request.longitude,
-                    'location_radius_m': request.location_radius_m,
-                    'ai_event_date': found_story.get('ai_event_date'),
-                    'ai_event_type': found_story.get('ai_event_type'),
-                    'ai_recency_score': found_story.get('ai_recency_score'),
-                    'ai_spatial_relevance': found_story.get('ai_spatial_relevance'),
-                    'ai_credibility_score': found_story.get('ai_credibility_score'),
-                    'created_by': request.created_by
+                    'location_id': location_id,
+                    'lore_narrative': finding.event_narrative,
+                    'place_name': finding.place_name,
+                    'event_location_name': finding.place_name,
+                    'source_type': source_type_str,
+                    'source_title': finding.source_title or "AI Discovered Event",
+                    'source_url': finding.source_url,
+                    'source_author': finding.source_author,
+                    'event_date': finding.event_date,
+                    'event_date_uncertainty_year': finding.event_date_uncertainty_years or 0,
+                    'years_ago': int(finding.years_ago) if finding.years_ago else None,
+                    'distance_to_report_location': finding.distance_to_report,
+                    'confidence_band': 'high' if (finding.confidence_band or 0) > 0.7 else 'medium' if (finding.confidence_band or 0) > 0.4 else 'low',
+                    'spatial_confidence': finding.spatial_score,
+                    'temporal_confidence': finding.recent_score,
+                    'credibility_confidence': finding.credibility_score,
+                    'l1_recency_score': finding.recent_score,
+                    'l2_credibility_score': finding.credibility_score,
+                    'l3_spatial_score': finding.spatial_score,
+                    'l_score': finding.l_score
                 })
 
-                story_ids.append(cur.fetchone()['story_id'])
+                lore_ids.append(cur.fetchone()['lore_id'])
 
             conn.commit()
 
-        return {
-            "message": f"Discovered {len(story_ids)} lore stories at location",
-            "story_ids": story_ids,
-            "location": {
-                "latitude": request.latitude,
-                "longitude": request.longitude,
-                "radius_m": request.location_radius_m
-            },
-            "ai_results": ai_results
-        }
+            return {
+                "message": f"Discovered {len(lore_ids)} lore stories at location",
+                "lore_ids": lore_ids,
+                "location_id": location_id,
+                "location": {
+                    "latitude": request.latitude,
+                    "longitude": request.longitude,
+                    "radius_m": request.location_radius_m
+                },
+                "ai_results": {
+                    "summary": result.summary,
+                    "confidence": result.confidence,
+                    "sources_count": result.sources_count,
+                    "findings_count": len(result.findings)
+                }
+            }
 
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Error discovering lore: {str(e)}")
     finally:
         conn.close()
 
