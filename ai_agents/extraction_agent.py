@@ -2,9 +2,9 @@ import json
 from typing import List, Optional
 from datetime import datetime
 from openai import OpenAI
-from models import LocalLoreExtraction, SourceType, ExtractionRequest
-from lore_calculator import LoreScoreCalculator
-from config import Config
+from .models import LocalLoreExtraction, SourceType, ExtractionRequest
+from .lore_calculator import LoreScoreCalculator
+from .config import Config
 import os
 
 class DocumentExtractionAgent:

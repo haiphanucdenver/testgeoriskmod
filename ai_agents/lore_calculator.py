@@ -1,8 +1,8 @@
 import math
 from datetime import datetime
 from typing import Optional
-from models import LocalLoreExtraction, LoreScore, SourceType
-from config import Config
+from .models import LocalLoreExtraction, LoreScore, SourceType
+from .config import Config
 
 class LoreScoreCalculator:
     """

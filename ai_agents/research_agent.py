@@ -2,14 +2,14 @@ import json
 from typing import List, Optional
 from datetime import datetime
 from openai import OpenAI
-from models import (
-    ResearchQuery, 
-    ResearchResult, 
+from .models import (
+    ResearchQuery,
+    ResearchResult,
     LocalLoreExtraction,
     HazardType
 )
-from extraction_agent import DocumentExtractionAgent
-from config import Config
+from .extraction_agent import DocumentExtractionAgent
+from .config import Config
 
 class DeepResearchAgent:
     """
