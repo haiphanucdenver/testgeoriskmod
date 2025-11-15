@@ -1892,6 +1892,13 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_extracted_locations": []
             }
         else:
+            # If user provided a location, override AI-extracted location for all lore entries
+            # This must happen BEFORE score calculation
+            if user_location:
+                for lore in lore_extractions:
+                    lore.place_name = user_location
+                logger.info(f"Overriding AI-extracted locations with user-provided: '{user_location}'")
+
             # Calculate scores for each extracted lore entry using LoreScoreCalculator
             for lore in lore_extractions:
                 lore_score_calculator.update_lore_with_scores(lore)
@@ -1901,11 +1908,12 @@ async def submit_lore_story_endpoint(request: Request):
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     for lore in lore_extractions:
-                        # Use user-provided location if available, otherwise use AI-extracted place_name
-                        final_place_name = user_location or lore.place_name or "Unknown Location"
+                        # lore.place_name already contains the correct location
+                        # (user-provided if given, otherwise AI-extracted)
+                        place_name = lore.place_name or "Unknown Location"
 
                         # Create or get location for this lore entry
-                        # Use placeholder coordinates (0, 0) when AI doesn't extract specific lat/lng
+                        # Use placeholder coordinates (0, 0) when we don't have specific lat/lng
                         # This allows saving place names while respecting NOT NULL constraints
                         cur.execute("""
                             INSERT INTO location (name, latitude, longitude, description)
@@ -1914,7 +1922,7 @@ async def submit_lore_story_endpoint(request: Request):
                             DO UPDATE SET description = EXCLUDED.description
                             RETURNING location_id
                         """, (
-                            final_place_name,
+                            place_name,
                             0.0,  # Placeholder - can be updated later with geocoding
                             0.0,  # Placeholder - can be updated later with geocoding
                             f"From story: {title}" + (" (user-provided)" if user_location else " (AI-extracted)")
@@ -1946,7 +1954,7 @@ async def submit_lore_story_endpoint(request: Request):
                             location_id,
                             title,  # Story title goes to lore_title
                             lore.event_narrative,
-                            final_place_name,  # Use user-provided location or AI-extracted
+                            place_name,  # Already contains user-provided or AI-extracted location
                             lore.years_ago,
                             source_type_str,
                             lore.event_date,  # AI extracted date
@@ -1962,7 +1970,6 @@ async def submit_lore_story_endpoint(request: Request):
 
             # Return summary of the first/primary extraction
             primary_lore = lore_extractions[0]
-            final_place_name = user_location or primary_lore.place_name or "Unknown Location"
 
             ai_results = {
                 "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
@@ -1973,11 +1980,11 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_l_score": primary_lore.l_score or 0.0,  # Overall L score
                 "ai_confidence": primary_lore.confidence_band or 0.5,
                 "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
-                "saved_location": final_place_name,  # Location saved to database (user-provided or AI-extracted)
+                "saved_location": primary_lore.place_name,  # Location saved to database (already user-provided or AI-extracted)
                 "location_source": "user" if user_location else "ai",  # Indicates where location came from
                 "ai_extracted_locations": [
                     {
-                        "name": lore.place_name,
+                        "name": lore.place_name,  # Now contains user-provided location if given
                         "confidence": lore.confidence_band or 0.5,
                         "l_score": lore.l_score or 0.0
                     } for lore in lore_extractions
