@@ -6,12 +6,21 @@
 // Get API URL from environment variable, fallback to localhost for development
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
 
+// Log the API base URL on startup
+console.log('🔧 API Configuration:', {
+  VITE_API_BASE_URL: import.meta.env.VITE_API_BASE_URL,
+  API_BASE_URL,
+  mode: import.meta.env.MODE
+});
+
 /**
  * Generic fetch wrapper with error handling
  */
 async function fetchAPI<T = any>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
-  
+
+  console.log('📡 API Request:', { method: options.method || 'GET', url, endpoint });
+
   try {
     const response = await fetch(url, {
       ...options,
