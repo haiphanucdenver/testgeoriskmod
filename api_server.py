@@ -2255,7 +2255,7 @@ def get_lore_narrative(
                     ll.l_score
                 FROM local_lore ll
                 LEFT JOIN location l ON ll.location_id = l.location_id
-                ORDER BY ll.created_at DESC
+                ORDER BY ll.created_date DESC
             """
             cur.execute(query)
             stories = cur.fetchall()
