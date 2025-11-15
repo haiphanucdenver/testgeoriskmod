@@ -1833,66 +1833,76 @@ def ai_agent_search_observation(observation_sight: str, observation_sound: str, 
 @app.post("/submit")
 async def submit_lore_story_endpoint(request: Request):
     """
-    Accept story payloads from frontend (many possible paths are supported).
-    Returns clear errors and logs full tracebacks for 500s so frontend can show a helpful message.
+    Submit a story for AI analysis and save to local_lore table.
+
+    Expected payload:
+    {
+      "title": "Story title",
+      "story_text": "The story content...",
+      "location_description": "Optional location context",
+      "created_by": "username"
+    }
     """
     try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    # Defensive: ensure minimal fields exist to avoid pydantic/AI errors
-    title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
-    story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
-    if not story_text:
-        # Try to call the original business logic if it exists
+        # Parse request body
         try:
-            # If original handler exists and is async, call it. We support both patterns:
-            if "submit_lore_story" in globals() and callable(globals().get("submit_lore_story")):
-                # avoid recursion if this function replaced the original; call internal implementation if present
-                impl = globals().get("_submit_lore_story_impl")
-                if impl and callable(impl):
-                    result = await impl(payload) if asyncio.iscoroutinefunction(impl) else impl(payload)
-                    return result
-            # Fallback: attempt to construct SubmitStoryRequest and call existing function name
-            try:
-                from ai_agents.models import SubmitStoryRequest  # may raise if not present
-                req = SubmitStoryRequest(**payload)
-                # original function name used in the codebase: submit_lore_story
-                if "submit_lore_story" in globals() and callable(globals().get("submit_lore_story")):
-                    res = globals().get("submit_lore_story")(req)
-                    # support coroutine
-                    if asyncio.iscoroutine(res):
-                        res = await res
-                    return res
-            except Exception:
-                # Not able to call original typed handler — continue to generic success path below
-                pass
-
-            # Generic behavior: persist story via lFactorAPI-style backend if available, otherwise echo
-            # Try to call a helper API client if present
-            try:
-                from services import lFactorAPI  # project-specific convenience client
-                response = await lFactorAPI.submitStory(payload)
-                return JSONResponse(status_code=200, content={"ai_status": response.get("ai_status", "submitted"), "lore_id": response.get("lore_id")})
-            except Exception:
-                # Last resort: return success echo (useful for frontend dev)
-                return JSONResponse(status_code=200, content={"ai_status": "accepted", "message": "Story received (dev-echo)", "payload_echo": {"title": title}})
-        except HTTPException:
-            # propagate known HTTP errors
-            raise
+            payload = await request.json()
         except Exception as e:
-            # Log full traceback to server logs for debugging
-            tb = traceback.format_exc()
-            logger.exception("submit_lore_story endpoint failed: %s", tb)
-            # Return concise JSON to frontend
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "Internal server error during story submission",
-                    "message": str(e),
-                    "hint": "Check server logs for full traceback (server console)"
-                },
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
+
+        # Extract required fields
+        title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
+        story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
+        location_description = payload.get("location_description")
+        created_by = payload.get("created_by", "anonymous")
+
+        # Validate required fields
+        if not title:
+            raise HTTPException(status_code=400, detail="Missing required field: title")
+        if not story_text:
+            raise HTTPException(status_code=400, detail="Missing required field: story_text")
+
+        logger.info(f"Received story submission: '{title}' from {created_by}")
+
+        # Call AI agent to analyze story and save to local_lore table
+        # The ai_agent_analyze_story function uses a story_id parameter but we don't have one yet
+        # We'll use a temporary ID of 0 since the function saves to local_lore anyway
+        ai_results = ai_agent_analyze_story(
+            story_id=0,  # Temporary - not used since we save directly to local_lore
+            story_text=story_text,
+            file_path=None
+        )
+
+        logger.info(f"AI analysis completed: {ai_results.get('ai_summary', 'No summary')[:100]}")
+
+        # Return success response matching frontend expectations
+        return JSONResponse(
+            status_code=200,
+            content={
+                "story_id": 0,  # We don't have lore_stories table, entries are in local_lore
+                "job_id": 0,    # Not using job queue for now
+                "message": "Story analyzed successfully and saved to local_lore table",
+                "ai_status": "completed",
+                "ai_results": ai_results
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Log full traceback to server logs for debugging
+        logger.exception(f"Story submission failed: {str(e)}")
+        traceback.print_exc()
+
+        # Return error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error during story submission",
+                "message": str(e),
+                "hint": "Check server logs for full traceback"
+            }
+        )
 
 @app.post("/api/lore/discover-at-location")
 def discover_lore_at_location(request: DiscoverLoreRequest):
