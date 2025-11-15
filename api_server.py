@@ -1547,69 +1547,232 @@ class DiscoverLoreRequest(BaseModel):
 
 def ai_agent_analyze_story(story_id: int, story_text: str, file_path: Optional[str] = None) -> dict:
     """
-    PLACEHOLDER: AI agent analyzes user-provided story to extract:
+    AI agent analyzes user-provided story using DocumentExtractionAgent to extract:
     - Event date (recency)
     - Event type (what happened)
     - Spatial information (where)
     - Credibility score
 
-    TODO: Replace with actual AI agent call
+    Extracted lore entries are saved to the local_lore table.
     """
-    import time
-    import random
+    try:
+        # Create extraction request
+        request = ExtractionRequest(
+            text=story_text,
+            location_context=None  # Could be enhanced with location context
+        )
 
-    # Simulate AI processing time
-    time.sleep(0.5)
+        # Use extraction agent to analyze the story
+        lore_extractions = extraction_agent.extract_from_text_sync(request)
 
-    # Return simulated AI analysis
-    return {
-        "ai_event_date": "1952-03-15",  # Extracted from story text
-        "ai_event_type": "landslide",
-        "ai_recency_score": 0.4,  # 1952 is moderately old
-        "ai_spatial_relevance": 0.8,  # Specific location mentioned
-        "ai_credibility_score": 0.7,  # Oral tradition, second-hand account
-        "ai_confidence": 0.75,
-        "ai_summary": "Historical landslide event near Eagle Creek in 1952, triggered by prolonged rainfall. Oral tradition account from family member.",
-        "ai_extracted_locations": [
-            {"name": "Eagle Creek", "latitude": 45.3725, "longitude": -121.7055, "confidence": 0.8}
-        ]
-    }
+        if not lore_extractions:
+            # No lore extracted from the story
+            return {
+                "ai_event_date": None,
+                "ai_event_type": None,
+                "ai_recency_score": 0.0,
+                "ai_spatial_relevance": 0.0,
+                "ai_credibility_score": 0.0,
+                "ai_confidence": 0.0,
+                "ai_summary": "No historical events could be extracted from the story.",
+                "ai_extracted_locations": []
+            }
+
+        # Save each extracted lore entry to local_lore table
+        conn = get_conn()
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for lore in lore_extractions:
+                    # Create or get location for this lore entry
+                    cur.execute("""
+                        INSERT INTO location (name, latitude, longitude, description)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (name, latitude, longitude)
+                        DO UPDATE SET description = EXCLUDED.description
+                        RETURNING location_id
+                    """, (
+                        lore.place_name,
+                        None,  # We don't have lat/lng from text extraction
+                        None,
+                        f"Extracted from story (ID: {story_id})"
+                    ))
+                    location_id = cur.fetchone()['location_id']
+
+                    # Convert source_type enum to string
+                    source_type_str = lore.source_type.value if lore.source_type else 'unknown'
+
+                    # Insert into local_lore table
+                    cur.execute("""
+                        INSERT INTO local_lore (
+                            location_id,
+                            source_title,
+                            lore_narrative,
+                            place_name,
+                            years_ago,
+                            source_type,
+                            credibility_confidence,
+                            distance_to_report_location
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING lore_id
+                    """, (
+                        location_id,
+                        lore.source_title or f"Story {story_id}",
+                        lore.event_narrative,
+                        lore.place_name,
+                        lore.years_ago,
+                        source_type_str,
+                        lore.confidence_band or lore.credibility_score,
+                        lore.distance_to_report or 0.0
+                    ))
+
+                conn.commit()
+        finally:
+            conn.close()
+
+        # Return summary of the first/primary extraction for the lore_stories table
+        primary_lore = lore_extractions[0]
+
+        return {
+            "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
+            "ai_event_type": "mass_movement",  # Generic type
+            "ai_recency_score": primary_lore.recent_score or 0.5,
+            "ai_spatial_relevance": primary_lore.spatial_score or 0.5,
+            "ai_credibility_score": primary_lore.credibility_score or 0.5,
+            "ai_confidence": primary_lore.confidence_band or 0.5,
+            "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}...",
+            "ai_extracted_locations": [
+                {
+                    "name": lore.place_name,
+                    "confidence": lore.confidence_band or 0.5
+                } for lore in lore_extractions
+            ]
+        }
+
+    except Exception as e:
+        print(f"Error in ai_agent_analyze_story: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def ai_agent_discover_lore(latitude: float, longitude: float, radius_m: float) -> dict:
     """
-    PLACEHOLDER: AI agent searches for lore/historical information at a location
+    AI agent searches for lore/historical information at a location using DeepResearchAgent.
     - Searches historical databases
     - Searches news archives
     - Searches indigenous knowledge repositories
     - Searches scientific literature
 
-    TODO: Replace with actual AI agent call
+    Discovered lore entries are saved to the local_lore table.
     """
-    import time
+    try:
+        # Create a location string for the research query
+        # In a production system, you might reverse geocode lat/lng to get a place name
+        location_str = f"Location: {latitude:.4f}, {longitude:.4f}"
 
-    # Simulate AI search time
-    time.sleep(1.0)
+        # Create research query
+        query = ResearchQuery(
+            location=location_str,
+            hazard_type=None,  # Search for all hazard types
+            time_range_years=100,  # Look back 100 years
+            include_indigenous_knowledge=True,
+            max_sources=10
+        )
 
-    # Return simulated discovered lore
-    return {
-        "found_stories": [
-            {
-                "title": "USGS landslide inventory entry",
-                "story_text": "Debris flow documented in 1996 USGS landslide inventory, triggered by intense rainfall event.",
-                "ai_event_date": "1996-02-09",
-                "ai_event_type": "debris_flow",
-                "ai_recency_score": 0.65,
-                "ai_spatial_relevance": 0.95,
-                "ai_credibility_score": 0.95,  # USGS = high credibility
-                "source": "USGS Landslide Inventory"
+        # Use research agent to discover lore
+        research_result = research_agent.conduct_research_sync(query)
+
+        if not research_result.findings:
+            # No lore found at this location
+            return {
+                "found_stories": [],
+                "search_metadata": {
+                    "sources_searched": [],
+                    "total_matches": 0,
+                    "search_duration_ms": 0
+                }
             }
-        ],
-        "search_metadata": {
-            "sources_searched": ["USGS", "local_newspapers", "tribal_archives"],
-            "total_matches": 1,
-            "search_duration_ms": 1000
+
+        # Save each discovered lore entry to local_lore table
+        conn = get_conn()
+        found_stories = []
+        try:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                for lore in research_result.findings:
+                    # Create or get location for this lore entry
+                    cur.execute("""
+                        INSERT INTO location (name, latitude, longitude, description)
+                        VALUES (%s, %s, %s, %s)
+                        ON CONFLICT (name, latitude, longitude)
+                        DO UPDATE SET description = EXCLUDED.description
+                        RETURNING location_id
+                    """, (
+                        lore.place_name,
+                        latitude,
+                        longitude,
+                        f"Discovered by AI research at {location_str}"
+                    ))
+                    location_id = cur.fetchone()['location_id']
+
+                    # Convert source_type enum to string
+                    source_type_str = lore.source_type.value if lore.source_type else 'unknown'
+
+                    # Insert into local_lore table
+                    cur.execute("""
+                        INSERT INTO local_lore (
+                            location_id,
+                            source_title,
+                            lore_narrative,
+                            place_name,
+                            years_ago,
+                            source_type,
+                            credibility_confidence,
+                            distance_to_report_location
+                        )
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        RETURNING lore_id
+                    """, (
+                        location_id,
+                        lore.source_title or "AI Discovered Lore",
+                        lore.event_narrative,
+                        lore.place_name,
+                        lore.years_ago,
+                        source_type_str,
+                        lore.confidence_band or lore.credibility_score,
+                        lore.distance_to_report or 0.0
+                    ))
+
+                    # Build story object for response
+                    found_stories.append({
+                        "title": lore.source_title or lore.place_name,
+                        "story_text": lore.event_narrative,
+                        "ai_event_date": lore.event_date.isoformat() if lore.event_date else None,
+                        "ai_event_type": "mass_movement",
+                        "ai_recency_score": lore.recent_score or 0.5,
+                        "ai_spatial_relevance": lore.spatial_score or 0.5,
+                        "ai_credibility_score": lore.credibility_score or 0.5,
+                        "source": source_type_str
+                    })
+
+                conn.commit()
+        finally:
+            conn.close()
+
+        return {
+            "found_stories": found_stories,
+            "search_metadata": {
+                "sources_searched": ["AI Research Agent", "Historical databases", "Scientific literature"],
+                "total_matches": len(found_stories),
+                "search_duration_ms": 0,
+                "research_confidence": research_result.confidence
+            }
         }
-    }
+
+    except Exception as e:
+        print(f"Error in ai_agent_discover_lore: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 def ai_agent_search_observation(observation_sight: str, observation_sound: str, latitude: float, longitude: float) -> dict:
     """
