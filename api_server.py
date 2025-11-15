@@ -33,6 +33,7 @@ from ai_agents.extraction_agent import DocumentExtractionAgent
 from ai_agents.research_agent import DeepResearchAgent
 from ai_agents.file_processor import FileProcessor
 from ai_agents.config import Config as AIConfig
+from ai_agents.lore_calculator import LoreScoreCalculator
 
 load_dotenv()
 
@@ -64,6 +65,7 @@ app.add_middleware(
 extraction_agent = DocumentExtractionAgent()
 research_agent = DeepResearchAgent()
 file_processor = FileProcessor()
+lore_score_calculator = LoreScoreCalculator()
 
 # Create upload directory for AI agents
 os.makedirs(AIConfig.UPLOAD_DIR, exist_ok=True)
@@ -1886,6 +1888,10 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_extracted_locations": []
             }
         else:
+            # Calculate scores for each extracted lore entry using LoreScoreCalculator
+            for lore in lore_extractions:
+                lore_score_calculator.update_lore_with_scores(lore)
+
             # Save each extracted lore entry to local_lore table
             conn = get_conn()
             try:
@@ -1912,8 +1918,7 @@ async def submit_lore_story_endpoint(request: Request):
                         source_type_str = lore.source_type.value if lore.source_type else 'unknown'
 
                         # Insert into local_lore table
-                        # Note: Scores (l1_recency_score, l2_credibility_score, l3_spatial_score, l_score)
-                        # are calculated by lore_calculator.py, not inserted here
+                        # Scores are calculated by lore_calculator.py and included in the insert
                         cur.execute("""
                             INSERT INTO local_lore (
                                 location_id,
@@ -1922,9 +1927,13 @@ async def submit_lore_story_endpoint(request: Request):
                                 place_name,
                                 years_ago,
                                 source_type,
-                                event_date
+                                event_date,
+                                l1_recency_score,
+                                l2_credibility_score,
+                                l3_spatial_score,
+                                l_score
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                             RETURNING lore_id
                         """, (
                             location_id,
@@ -1933,7 +1942,11 @@ async def submit_lore_story_endpoint(request: Request):
                             lore.place_name,
                             lore.years_ago,
                             source_type_str,
-                            lore.event_date  # AI extracted date
+                            lore.event_date,  # AI extracted date
+                            lore.recent_score,  # L1: Recency score
+                            lore.credibility_score,  # L2: Credibility score
+                            lore.spatial_score,  # L3: Spatial score
+                            lore.l_score  # Overall L score
                         ))
 
                     conn.commit()
@@ -1945,15 +1958,17 @@ async def submit_lore_story_endpoint(request: Request):
             ai_results = {
                 "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
                 "ai_event_type": "mass_movement",
-                "ai_recency_score": primary_lore.recent_score or 0.5,
-                "ai_spatial_relevance": primary_lore.spatial_score or 0.5,
-                "ai_credibility_score": primary_lore.credibility_score or 0.5,
+                "ai_recency_score": primary_lore.recent_score or 0.0,
+                "ai_spatial_relevance": primary_lore.spatial_score or 0.0,
+                "ai_credibility_score": primary_lore.credibility_score or 0.0,
+                "ai_l_score": primary_lore.l_score or 0.0,  # Overall L score
                 "ai_confidence": primary_lore.confidence_band or 0.5,
                 "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
                 "ai_extracted_locations": [
                     {
                         "name": lore.place_name,
-                        "confidence": lore.confidence_band or 0.5
+                        "confidence": lore.confidence_band or 0.5,
+                        "l_score": lore.l_score or 0.0
                     } for lore in lore_extractions
                 ]
             }
