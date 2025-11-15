@@ -1,6 +1,6 @@
 from openai import OpenAI
 import os
-from config import Config
+from .config import Config
 from datetime import datetime
 
 

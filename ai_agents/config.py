@@ -1,7 +1,7 @@
 import os
 from dotenv import load_dotenv
 from enum import Enum
-from models import SourceType
+from .models import SourceType
 load_dotenv()
 
 

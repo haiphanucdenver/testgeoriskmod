@@ -11,12 +11,12 @@ def test_imports():
     """Test that all required modules can be imported"""
     print("1. Testing imports...")
     try:
-        from models import LocalLoreExtraction, ResearchQuery, SourceType
-        from extraction_agent import DocumentExtractionAgent
-        from research_agent import DeepResearchAgent
-        from lore_calculator import LoreScoreCalculator
-        from file_processor import FileProcessor
-        from config import Config
+        from .models import LocalLoreExtraction, ResearchQuery, SourceType
+        from .extraction_agent import DocumentExtractionAgent
+        from .research_agent import DeepResearchAgent
+        from .lore_calculator import LoreScoreCalculator
+        from .file_processor import FileProcessor
+        from .config import Config
         print("   ✓ All imports successful")
         return True
     except ImportError as e:
@@ -27,7 +27,7 @@ def test_config():
     """Test configuration"""
     print("\n2. Testing configuration...")
     try:
-        from config import Config
+        from .config import Config
         
         if not Config.OPENAI_API_KEY:
             print("   ⚠️  Warning: OPENAI_API_KEY not set")
@@ -46,8 +46,8 @@ def test_lore_calculator():
     """Test L-score calculator"""
     print("\n3. Testing L-score calculator...")
     try:
-        from lore_calculator import LoreScoreCalculator
-        from models import LocalLoreExtraction, SourceType
+        from .lore_calculator import LoreScoreCalculator
+        from .models import LocalLoreExtraction, SourceType
         
         calculator = LoreScoreCalculator()
         
@@ -88,7 +88,7 @@ def test_file_processor():
     """Test file processor"""
     print("\n4. Testing file processor...")
     try:
-        from file_processor import FileProcessor
+        from .file_processor import FileProcessor
         
         # Create a test file
         test_content = "Test content for file processing"
@@ -117,9 +117,9 @@ def test_extraction_agent():
     """Test extraction agent (requires API key)"""
     print("\n5. Testing extraction agent...")
     try:
-        from extraction_agent import DocumentExtractionAgent
-        from models import ExtractionRequest
-        from config import Config
+        from .extraction_agent import DocumentExtractionAgent
+        from .models import ExtractionRequest
+        from .config import Config
         
         if not Config.OPENAI_API_KEY:
             print("   ⚠️  Skipping (no API key)")
@@ -160,9 +160,9 @@ def test_research_agent():
     """Test research agent (requires API key)"""
     print("\n6. Testing research agent...")
     try:
-        from research_agent import DeepResearchAgent
-        from models import ResearchQuery, HazardType
-        from config import Config
+        from .research_agent import DeepResearchAgent
+        from .models import ResearchQuery, HazardType
+        from .config import Config
         
         if not Config.OPENAI_API_KEY:
             print("   ⚠️  Skipping (no API key)")
