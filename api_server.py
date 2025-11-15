@@ -2209,6 +2209,7 @@ def get_lore_narrative(
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
+<<<<<<< HEAD
     """Get all lore narratives with optional filters"""
     conn = get_conn()
     try:
@@ -2231,6 +2232,37 @@ def get_lore_narrative(
             query += " ORDER BY created_at DESC"
 
             cur.execute(query, params)
+=======
+    """
+    Get all lore stories from local_lore table.
+    Maps local_lore data to frontend-expected format for AI agent stories.
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            # Query local_lore table instead of non-existent lore_stories table
+            cur.execute("""
+                SELECT
+                    ll.lore_id as story_id,
+                    ll.location_id as area_id,
+                    ll.source_title as title,
+                    ll.lore_narrative as story_text,
+                    'user_story' as scenario_type,
+                    l.latitude,
+                    l.longitude,
+                    l.description as location_description,
+                    'completed' as ai_status,
+                    ll.created_at,
+                    ll.source_type as ai_event_type,
+                    ll.years_ago,
+                    ll.credibility_confidence as ai_credibility_score,
+                    ll.place_name,
+                    'user' as created_by
+                FROM local_lore ll
+                LEFT JOIN location l ON ll.location_id = l.location_id
+                ORDER BY ll.created_at DESC
+            """)
+>>>>>>> c12dc4dda28e0c2e797a383bd6df660fec209609
             stories = cur.fetchall()
 
             return {
