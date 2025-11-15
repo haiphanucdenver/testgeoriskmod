@@ -1833,66 +1833,159 @@ def ai_agent_search_observation(observation_sight: str, observation_sound: str, 
 @app.post("/submit")
 async def submit_lore_story_endpoint(request: Request):
     """
-    Accept story payloads from frontend (many possible paths are supported).
-    Returns clear errors and logs full tracebacks for 500s so frontend can show a helpful message.
+    Submit a story for AI analysis and save to local_lore table.
+
+    Expected payload:
+    {
+      "title": "Story title",
+      "story_text": "The story content...",
+      "location_description": "Optional location context",
+      "created_by": "username"
+    }
     """
     try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
-    # Defensive: ensure minimal fields exist to avoid pydantic/AI errors
-    title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
-    story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
-    if not story_text:
-        # Try to call the original business logic if it exists
+        # Parse request body
         try:
-            # If original handler exists and is async, call it. We support both patterns:
-            if "submit_lore_story" in globals() and callable(globals().get("submit_lore_story")):
-                # avoid recursion if this function replaced the original; call internal implementation if present
-                impl = globals().get("_submit_lore_story_impl")
-                if impl and callable(impl):
-                    result = await impl(payload) if asyncio.iscoroutinefunction(impl) else impl(payload)
-                    return result
-            # Fallback: attempt to construct SubmitStoryRequest and call existing function name
-            try:
-                from ai_agents.models import SubmitStoryRequest  # may raise if not present
-                req = SubmitStoryRequest(**payload)
-                # original function name used in the codebase: submit_lore_story
-                if "submit_lore_story" in globals() and callable(globals().get("submit_lore_story")):
-                    res = globals().get("submit_lore_story")(req)
-                    # support coroutine
-                    if asyncio.iscoroutine(res):
-                        res = await res
-                    return res
-            except Exception:
-                # Not able to call original typed handler — continue to generic success path below
-                pass
-
-            # Generic behavior: persist story via lFactorAPI-style backend if available, otherwise echo
-            # Try to call a helper API client if present
-            try:
-                from services import lFactorAPI  # project-specific convenience client
-                response = await lFactorAPI.submitStory(payload)
-                return JSONResponse(status_code=200, content={"ai_status": response.get("ai_status", "submitted"), "lore_id": response.get("lore_id")})
-            except Exception:
-                # Last resort: return success echo (useful for frontend dev)
-                return JSONResponse(status_code=200, content={"ai_status": "accepted", "message": "Story received (dev-echo)", "payload_echo": {"title": title}})
-        except HTTPException:
-            # propagate known HTTP errors
-            raise
+            payload = await request.json()
         except Exception as e:
-            # Log full traceback to server logs for debugging
-            tb = traceback.format_exc()
-            logger.exception("submit_lore_story endpoint failed: %s", tb)
-            # Return concise JSON to frontend
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "Internal server error during story submission",
-                    "message": str(e),
-                    "hint": "Check server logs for full traceback (server console)"
-                },
-            )
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
+
+        # Extract required fields
+        title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
+        story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
+        location_description = payload.get("location_description")
+        created_by = payload.get("created_by", "anonymous")
+
+        # Validate required fields
+        if not title:
+            raise HTTPException(status_code=400, detail="Missing required field: title")
+        if not story_text:
+            raise HTTPException(status_code=400, detail="Missing required field: story_text")
+
+        logger.info(f"Received story submission: '{title}' from {created_by}")
+
+        # Call AI extraction agent directly (async version)
+        request = ExtractionRequest(
+            text=story_text,
+            location_context=location_description
+        )
+
+        # Use async extraction method since we're in an async endpoint
+        lore_extractions = await extraction_agent.extract_from_text(request)
+
+        if not lore_extractions:
+            # No lore extracted from the story
+            ai_results = {
+                "ai_event_date": None,
+                "ai_event_type": None,
+                "ai_recency_score": 0.0,
+                "ai_spatial_relevance": 0.0,
+                "ai_credibility_score": 0.0,
+                "ai_confidence": 0.0,
+                "ai_summary": "No historical events could be extracted from the story.",
+                "ai_extracted_locations": []
+            }
+        else:
+            # Save each extracted lore entry to local_lore table
+            conn = get_conn()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    for lore in lore_extractions:
+                        # Create or get location for this lore entry
+                        cur.execute("""
+                            INSERT INTO location (name, latitude, longitude, description)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (name, latitude, longitude)
+                            DO UPDATE SET description = EXCLUDED.description
+                            RETURNING location_id
+                        """, (
+                            lore.place_name or "Unknown Location",
+                            None,  # We don't have lat/lng from text extraction
+                            None,
+                            f"Extracted from story: {title}"
+                        ))
+                        location_id = cur.fetchone()['location_id']
+
+                        # Convert source_type enum to string
+                        source_type_str = lore.source_type.value if lore.source_type else 'unknown'
+
+                        # Insert into local_lore table
+                        cur.execute("""
+                            INSERT INTO local_lore (
+                                location_id,
+                                source_title,
+                                lore_narrative,
+                                place_name,
+                                years_ago,
+                                source_type,
+                                credibility_confidence,
+                                distance_to_report_location
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING lore_id
+                        """, (
+                            location_id,
+                            lore.source_title or title,
+                            lore.event_narrative,
+                            lore.place_name,
+                            lore.years_ago,
+                            source_type_str,
+                            lore.confidence_band or lore.credibility_score,
+                            lore.distance_to_report or 0.0
+                        ))
+
+                    conn.commit()
+            finally:
+                conn.close()
+
+            # Return summary of the first/primary extraction
+            primary_lore = lore_extractions[0]
+            ai_results = {
+                "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
+                "ai_event_type": "mass_movement",
+                "ai_recency_score": primary_lore.recent_score or 0.5,
+                "ai_spatial_relevance": primary_lore.spatial_score or 0.5,
+                "ai_credibility_score": primary_lore.credibility_score or 0.5,
+                "ai_confidence": primary_lore.confidence_band or 0.5,
+                "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
+                "ai_extracted_locations": [
+                    {
+                        "name": lore.place_name,
+                        "confidence": lore.confidence_band or 0.5
+                    } for lore in lore_extractions
+                ]
+            }
+
+        logger.info(f"AI analysis completed: {ai_results.get('ai_summary', 'No summary')[:100]}")
+
+        # Return success response matching frontend expectations
+        return JSONResponse(
+            status_code=200,
+            content={
+                "story_id": 0,  # We don't have lore_stories table, entries are in local_lore
+                "job_id": 0,    # Not using job queue for now
+                "message": "Story analyzed successfully and saved to local_lore table",
+                "ai_status": "completed",
+                "ai_results": ai_results
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Log full traceback to server logs for debugging
+        logger.exception(f"Story submission failed: {str(e)}")
+        traceback.print_exc()
+
+        # Return error response
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": "Internal server error during story submission",
+                "message": str(e),
+                "hint": "Check server logs for full traceback"
+            }
+        )
 
 @app.post("/api/lore/discover-at-location")
 def discover_lore_at_location(request: DiscoverLoreRequest):
@@ -2116,28 +2209,35 @@ def get_lore_stories(
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
-    """Get all lore stories with optional filters"""
+    """
+    Get all lore stories from local_lore table.
+    Maps local_lore data to frontend-expected format for AI agent stories.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM lore_stories WHERE 1=1"
-            params = {}
-
-            if area_id is not None:
-                query += " AND area_id = %(area_id)s"
-                params['area_id'] = area_id
-
-            if scenario_type:
-                query += " AND scenario_type = %(scenario_type)s"
-                params['scenario_type'] = scenario_type
-
-            if ai_status:
-                query += " AND ai_status = %(ai_status)s"
-                params['ai_status'] = ai_status
-
-            query += " ORDER BY created_at DESC"
-
-            cur.execute(query, params)
+            # Query local_lore table instead of non-existent lore_stories table
+            cur.execute("""
+                SELECT
+                    ll.lore_id as story_id,
+                    ll.location_id as area_id,
+                    ll.source_title as title,
+                    ll.lore_narrative as story_text,
+                    'user_story' as scenario_type,
+                    l.latitude,
+                    l.longitude,
+                    l.description as location_description,
+                    'completed' as ai_status,
+                    ll.created_at,
+                    ll.source_type as ai_event_type,
+                    ll.years_ago,
+                    ll.credibility_confidence as ai_credibility_score,
+                    ll.place_name,
+                    'user' as created_by
+                FROM local_lore ll
+                LEFT JOIN location l ON ll.location_id = l.location_id
+                ORDER BY ll.created_at DESC
+            """)
             stories = cur.fetchall()
 
             return {
