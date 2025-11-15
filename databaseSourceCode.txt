@@ -219,5 +219,52 @@ COMMENT ON COLUMN risk.l_score IS 'Local Lore & History score [0,1]';
 COMMENT ON COLUMN risk.v_score IS 'Vulnerability (Ontologicity) score [0,1]';
 COMMENT ON COLUMN risk.overall_score IS 'Combined Borromean risk score = f(H,L,V)';
 
+<<<<<<< HEAD
 ALTER TABLE risk
 ADD COLUMN lore_id INTEGER REFERENCES local_lore(lore_id) ON DELETE SET NULL;
+=======
+-- =====================================================
+-- DATA_SOURCES Table
+-- =====================================================
+-- This table tracks data sources for H, L, and V factors
+-- Supports both file uploads and API connections
+
+CREATE TABLE data_sources (
+    source_id SERIAL PRIMARY KEY,
+    item_id VARCHAR(255) NOT NULL UNIQUE,
+    source_name VARCHAR(500) NOT NULL,
+    description TEXT,
+    source_type VARCHAR(100) NOT NULL, -- 'file' or 'api'
+    factor_category VARCHAR(1) NOT NULL CHECK (factor_category IN ('H', 'L', 'V')),
+    status VARCHAR(50) NOT NULL DEFAULT 'missing' CHECK (status IN ('missing', 'uploaded', 'connected')),
+
+    -- File-based source fields
+    file_format VARCHAR(100), -- e.g., 'GeoJSON', 'Shapefile', 'CSV', 'GeoTIFF'
+    file_type VARCHAR(100), -- e.g., 'vector', 'raster'
+    file_path TEXT,
+
+    -- API-based source fields
+    api_endpoint TEXT,
+    api_service VARCHAR(255), -- e.g., 'USGS', 'OpenTopography', 'Custom'
+
+    -- Version tracking
+    current_version INTEGER DEFAULT 1,
+
+    -- Metadata
+    last_updated TIMESTAMP,
+    uploaded_by VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Create indexes for common queries
+CREATE INDEX idx_data_sources_item_id ON data_sources(item_id);
+CREATE INDEX idx_data_sources_factor_category ON data_sources(factor_category);
+CREATE INDEX idx_data_sources_status ON data_sources(status);
+CREATE INDEX idx_data_sources_source_type ON data_sources(source_type);
+
+COMMENT ON TABLE data_sources IS 'Tracks data sources for H (Hazard), L (Local Lore), and V (Vulnerability) factors';
+COMMENT ON COLUMN data_sources.item_id IS 'Unique identifier for the data source (e.g., h-factor-dem)';
+COMMENT ON COLUMN data_sources.factor_category IS 'Factor category: H (Hazard/Event), L (Local Lore), V (Vulnerability)';
+COMMENT ON COLUMN data_sources.status IS 'Current status of the data source';
+>>>>>>> e9220d0ea741266a57b36127e0947342fbcfc0ae
