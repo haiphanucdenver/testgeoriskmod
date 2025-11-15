@@ -1,4 +1,26 @@
-from pydantic import BaseModel, Field
+try:
+    from pydantic import BaseModel, Field  # type: ignore
+except Exception:
+    # Minimal fallbacks when pydantic is not available (prevents editor/linter import errors).
+    # These stubs do not provide full pydantic functionality; install pydantic for full features:
+    #     pip install "pydantic>=1.10"
+    from typing import Any
+
+    def Field(default: Any = None, **kwargs):
+        # Return the provided default so class attributes can be defined without error.
+        return default
+
+    class BaseModel:
+        # Very small stub to allow construction and basic dict() serialization.
+        def __init__(self, **data):
+            for k, v in data.items():
+                setattr(self, k, v)
+
+        def dict(self):
+            return self.__dict__
+
+        class Config:
+            pass
 from typing import Optional, List, Literal
 from datetime import datetime
 from enum import Enum

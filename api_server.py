@@ -14,13 +14,17 @@ import numpy as np
 import json
 
 # AI Agent imports
+from openai import OpenAI
+# Use absolute imports for ai_agents so api_server can be imported as a top-level module
 from ai_agents.models import (
     ExtractionRequest,
     ResearchQuery,
-    LocalLoreExtraction,
     ResearchResult,
+    LocalLoreExtraction,
     HazardType
 )
+#from ai_agents.models import LocalLoreExtraction, SourceType, ExtractionRequest
+
 from ai_agents.extraction_agent import DocumentExtractionAgent
 from ai_agents.research_agent import DeepResearchAgent
 from ai_agents.file_processor import FileProcessor
@@ -2218,6 +2222,7 @@ def get_ai_jobs(status: Optional[str] = None):
                 cur.execute("""
                     SELECT * FROM v_ai_job_queue
                     WHERE status = %(status)s
+                   
                     ORDER BY queued_at DESC
                 """, {'status': status})
             else:
