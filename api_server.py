@@ -1864,14 +1864,97 @@ async def submit_lore_story_endpoint(request: Request):
 
         logger.info(f"Received story submission: '{title}' from {created_by}")
 
-        # Call AI agent to analyze story and save to local_lore table
-        # The ai_agent_analyze_story function uses a story_id parameter but we don't have one yet
-        # We'll use a temporary ID of 0 since the function saves to local_lore anyway
-        ai_results = ai_agent_analyze_story(
-            story_id=0,  # Temporary - not used since we save directly to local_lore
-            story_text=story_text,
-            file_path=None
+        # Call AI extraction agent directly (async version)
+        request = ExtractionRequest(
+            text=story_text,
+            location_context=location_description
         )
+
+        # Use async extraction method since we're in an async endpoint
+        lore_extractions = await extraction_agent.extract_from_text(request)
+
+        if not lore_extractions:
+            # No lore extracted from the story
+            ai_results = {
+                "ai_event_date": None,
+                "ai_event_type": None,
+                "ai_recency_score": 0.0,
+                "ai_spatial_relevance": 0.0,
+                "ai_credibility_score": 0.0,
+                "ai_confidence": 0.0,
+                "ai_summary": "No historical events could be extracted from the story.",
+                "ai_extracted_locations": []
+            }
+        else:
+            # Save each extracted lore entry to local_lore table
+            conn = get_conn()
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    for lore in lore_extractions:
+                        # Create or get location for this lore entry
+                        cur.execute("""
+                            INSERT INTO location (name, latitude, longitude, description)
+                            VALUES (%s, %s, %s, %s)
+                            ON CONFLICT (name, latitude, longitude)
+                            DO UPDATE SET description = EXCLUDED.description
+                            RETURNING location_id
+                        """, (
+                            lore.place_name or "Unknown Location",
+                            None,  # We don't have lat/lng from text extraction
+                            None,
+                            f"Extracted from story: {title}"
+                        ))
+                        location_id = cur.fetchone()['location_id']
+
+                        # Convert source_type enum to string
+                        source_type_str = lore.source_type.value if lore.source_type else 'unknown'
+
+                        # Insert into local_lore table
+                        cur.execute("""
+                            INSERT INTO local_lore (
+                                location_id,
+                                source_title,
+                                lore_narrative,
+                                place_name,
+                                years_ago,
+                                source_type,
+                                credibility_confidence,
+                                distance_to_report_location
+                            )
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            RETURNING lore_id
+                        """, (
+                            location_id,
+                            lore.source_title or title,
+                            lore.event_narrative,
+                            lore.place_name,
+                            lore.years_ago,
+                            source_type_str,
+                            lore.confidence_band or lore.credibility_score,
+                            lore.distance_to_report or 0.0
+                        ))
+
+                    conn.commit()
+            finally:
+                conn.close()
+
+            # Return summary of the first/primary extraction
+            primary_lore = lore_extractions[0]
+            ai_results = {
+                "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
+                "ai_event_type": "mass_movement",
+                "ai_recency_score": primary_lore.recent_score or 0.5,
+                "ai_spatial_relevance": primary_lore.spatial_score or 0.5,
+                "ai_credibility_score": primary_lore.credibility_score or 0.5,
+                "ai_confidence": primary_lore.confidence_band or 0.5,
+                "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
+                "ai_extracted_locations": [
+                    {
+                        "name": lore.place_name,
+                        "confidence": lore.confidence_band or 0.5
+                    } for lore in lore_extractions
+                ]
+            }
 
         logger.info(f"AI analysis completed: {ai_results.get('ai_summary', 'No summary')[:100]}")
 
