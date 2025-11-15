@@ -1,7 +1,20 @@
-from openai import OpenAI
+import sys
 import os
-from .config import Config
+from pathlib import Path
 from datetime import datetime
+
+# Ensure repo root is on sys.path so "ai_agents" imports work when running this script directly
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
+from ai_agents.config import Config
+
+try:
+    from openai import OpenAI
+except Exception:
+    print("Error: 'openai' package not installed. Install with: pip install openai")
+    raise
 
 
 api_key = os.getenv("OPENAI_API_KEY") or Config.OPENAI_API_KEY

@@ -1070,13 +1070,16 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     const loadingToast = toast.loading('Submitting story to AI for analysis...');
 
+    const payload = {
+      title: storyForm.title,
+      story_text: storyForm.story_text,
+      location_description: storyForm.location_description,
+      created_by: 'Current User'
+    };
+
     try {
-      const response = await loreAPI.submitStory({
-        title: storyForm.title,
-        story_text: storyForm.story_text,
-        location_description: storyForm.location_description,
-        created_by: 'Current User'
-      });
+      // Primary attempt using the app's API wrapper
+      const response = await loreAPI.submitStory(payload);
 
       toast.dismiss(loadingToast);
 
@@ -1096,10 +1099,95 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         spatial_relevance_m: ''
       });
       await loadLoreStories();
-    } catch (error) {
+      return;
+    } catch (primaryError) {
+      console.warn('Primary loreAPI.submitStory failed:', primaryError);
+      // Try direct fallback attempts to help when VITE_API_BASE_URL is missing or CORS/port mismatch occurs.
+
+      // Build candidate roots to probe (env, window origin, common dev ports)
+      const envRoot = (import.meta as any)?.env?.VITE_API_BASE_URL || '';
+      const candidates = [
+        envRoot,
+        window.location.origin,
+        'http://localhost:8001',
+        'http://localhost:3001',
+        'http://localhost:3000'
+      ].filter(Boolean).map(s => s.replace(/\/+$/, ''));
+
+      const endpoints = [
+        '/api/lore/submit',
+        '/api/lore/submit-story',
+        '/lore/submit',
+        '/api/ai/lore/submit',
+        '/ai/lore/submit',
+        '/api/ai/submit',
+        '/ai/submit',
+        '/api/stories/submit',
+        '/stories/submit',
+        '/submit'
+      ];
+
+      let successJson: any = null;
+      let successUrl: string | null = null;
+      const errors: string[] = [];
+
+      outer: for (const root of candidates) {
+        for (const ep of endpoints) {
+          const url = `${root}${ep.startsWith('/') ? ep : '/' + ep}`;
+          try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const resp = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (!resp.ok) {
+              const txt = await resp.text().catch(() => '');
+              errors.push(`${url} -> ${resp.status} ${resp.statusText} ${txt ? `: ${txt.slice(0,200)}` : ''}`);
+              continue;
+            }
+
+            // success
+            successJson = await resp.json().catch(() => null);
+            successUrl = url;
+            break outer;
+          } catch (e: any) {
+            errors.push(`${url} -> ${e?.name || 'Error'} ${e?.message || ''}`);
+            // continue trying other endpoints/roots
+          }
+        }
+      }
+
       toast.dismiss(loadingToast);
-      console.error('Failed to submit story:', error);
-      toast.error(getErrorMessage(error));
+
+      if (successJson) {
+        // Handle fallback success similarly to normal response
+        if (successJson.ai_status === 'completed') {
+          toast.success(`Story analyzed successfully! (via ${successUrl})`);
+        } else {
+          toast.error(`Story submitted but AI analysis failed (via ${successUrl}): ${successJson.message || 'unknown'}`);
+        }
+
+        // Clear and reload
+        setStoryForm({
+          title: '',
+          story_text: '',
+          location_description: '',
+          recency_years: '',
+          credibility: '',
+          spatial_relevance_m: ''
+        });
+        await loadLoreStories();
+        return;
+      }
+
+      // Still failed — give clear developer guidance
+      console.error('No fallback endpoint succeeded. Tried candidates:', candidates, 'endpoints:', endpoints, 'errors:', errors.slice(0, 8));
+      toast.error('Failed to submit story: network error or server not reachable. Check VITE_API_BASE_URL (set to your backend root, e.g. http://localhost:8001) and restart the frontend. Open the console for details.');
     }
   };
 
@@ -1878,6 +1966,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   };
 
   // Render quality indicator
+
   const renderQualityIndicator = (quality: { percentage: number; status: 'excellent' | 'good' | 'fair' | 'poor' }) => {
     const getStatusColor = (status: string) => {
       switch (status) {
