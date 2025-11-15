@@ -1915,7 +1915,7 @@ def discover_lore_at_location(request: DiscoverLoreRequest):
             for found_story in ai_results.get('found_stories', []):
                 # Insert discovered story
                 cur.execute("""
-                    INSERT INTO lore_stories (
+                    INSERT INTO lore_narrative(
                         area_id, title, story_text,
                         latitude, longitude, location_radius_m,
                         scenario_type, ai_status,
@@ -1974,7 +1974,7 @@ def submit_observation(request: SubmitObservationRequest):
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # Insert observation
             cur.execute("""
-                INSERT INTO lore_stories (
+                INSERT INTO lore_narrative (
                     area_id, title,
                     latitude, longitude, location_description,
                     observation_sight, observation_sound, observation_datetime,
@@ -2038,9 +2038,9 @@ def submit_observation(request: SubmitObservationRequest):
                     request.longitude
                 )
 
-                # Update story with AI results
+                # Update narrative with AI results
                 cur.execute("""
-                    UPDATE lore_stories
+                    UPDATE lore_narrative
                     SET ai_status = 'completed',
                         ai_processed_at = CURRENT_TIMESTAMP,
                         ai_event_type = %(ai_event_type)s,
@@ -2084,7 +2084,7 @@ def submit_observation(request: SubmitObservationRequest):
                 """, {'job_id': job_id, 'error': str(ai_error)})
 
                 cur.execute("""
-                    UPDATE lore_stories
+                    UPDATE lore_narrative
                     SET ai_status = 'failed', ai_error_message = %(error)s
                     WHERE story_id = %(story_id)s
                 """, {'story_id': story_id, 'error': str(ai_error)})
@@ -2110,17 +2110,17 @@ def submit_observation(request: SubmitObservationRequest):
     finally:
         conn.close()
 
-@app.get("/api/lore/stories")
-def get_lore_stories(
+@app.get("/api/lore/narrative")
+def get_lore_narrative(
     area_id: Optional[int] = None,
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
-    """Get all lore stories with optional filters"""
+    """Get all lore narratives with optional filters"""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM lore_stories WHERE 1=1"
+            query = "SELECT * FROM lore_narrative WHERE 1=1"
             params = {}
 
             if area_id is not None:
