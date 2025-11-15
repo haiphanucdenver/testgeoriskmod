@@ -1892,6 +1892,8 @@ async def submit_lore_story_endpoint(request: Request):
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     for lore in lore_extractions:
                         # Create or get location for this lore entry
+                        # Use placeholder coordinates (0, 0) when AI doesn't extract specific lat/lng
+                        # This allows saving extracted place names while respecting NOT NULL constraints
                         cur.execute("""
                             INSERT INTO location (name, latitude, longitude, description)
                             VALUES (%s, %s, %s, %s)
@@ -1900,8 +1902,8 @@ async def submit_lore_story_endpoint(request: Request):
                             RETURNING location_id
                         """, (
                             lore.place_name or "Unknown Location",
-                            None,  # We don't have lat/lng from text extraction
-                            None,
+                            0.0,  # Placeholder - AI extracted place name but no coordinates
+                            0.0,  # Placeholder - can be updated later with geocoding
                             f"Extracted from story: {title}"
                         ))
                         location_id = cur.fetchone()['location_id']
