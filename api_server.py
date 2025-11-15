@@ -1061,30 +1061,35 @@ def get_data_sources():
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("""
-                SELECT
-                    source_id,
-                    item_id,
-                    source_name,
-                    description,
-                    source_type,
-                    factor_category,
-                    status,
-                    file_format,
-                    file_type,
-                    file_path,
-                    api_endpoint,
-                    api_service,
-                    current_version,
-                    last_updated,
-                    uploaded_by,
-                    created_at,
-                    updated_at
-                FROM data_sources
-                ORDER BY factor_category, item_id
-            """)
-            sources = cur.fetchall()
-            return {"count": len(sources), "data_sources": sources}
+            try:
+                cur.execute("""
+                    SELECT
+                        source_id,
+                        item_id,
+                        source_name,
+                        description,
+                        source_type,
+                        factor_category,
+                        status,
+                        file_format,
+                        file_type,
+                        file_path,
+                        api_endpoint,
+                        api_service,
+                        current_version,
+                        last_updated,
+                        uploaded_by,
+                        created_at,
+                        updated_at
+                    FROM data_sources
+                    ORDER BY factor_category, item_id
+                """)
+                sources = cur.fetchall()
+                return {"count": len(sources), "data_sources": sources}
+            except psycopg2.errors.UndefinedTable:
+                # Table doesn't exist yet - return empty data
+                logger.warning("data_sources table does not exist, returning empty list")
+                return {"count": 0, "data_sources": []}
     finally:
         conn.close()
 
@@ -1094,11 +1099,15 @@ def get_data_source(item_id: str):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM data_sources WHERE item_id = %s", (item_id,))
-            source = cur.fetchone()
-            if not source:
-                raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found")
-            return source
+            try:
+                cur.execute("SELECT * FROM data_sources WHERE item_id = %s", (item_id,))
+                source = cur.fetchone()
+                if not source:
+                    raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found")
+                return source
+            except psycopg2.errors.UndefinedTable:
+                # Table doesn't exist yet
+                raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found (data_sources table does not exist)")
     finally:
         conn.close()
 
@@ -1108,47 +1117,51 @@ def update_data_source(item_id: str, data: DataSourceUpdate):
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Build dynamic UPDATE query
-            update_fields = []
-            values = []
+            try:
+                # Build dynamic UPDATE query
+                update_fields = []
+                values = []
 
-            if data.status is not None:
-                update_fields.append("status = %s")
-                values.append(data.status)
+                if data.status is not None:
+                    update_fields.append("status = %s")
+                    values.append(data.status)
 
-            if data.current_version is not None:
-                update_fields.append("current_version = %s")
-                values.append(data.current_version)
+                if data.current_version is not None:
+                    update_fields.append("current_version = %s")
+                    values.append(data.current_version)
 
-            if data.last_updated is not None:
-                update_fields.append("last_updated = %s")
-                values.append(data.last_updated)
+                if data.last_updated is not None:
+                    update_fields.append("last_updated = %s")
+                    values.append(data.last_updated)
 
-            if data.file_path is not None:
-                update_fields.append("file_path = %s")
-                values.append(data.file_path)
+                if data.file_path is not None:
+                    update_fields.append("file_path = %s")
+                    values.append(data.file_path)
 
-            if data.uploaded_by is not None:
-                update_fields.append("uploaded_by = %s")
-                values.append(data.uploaded_by)
+                if data.uploaded_by is not None:
+                    update_fields.append("uploaded_by = %s")
+                    values.append(data.uploaded_by)
 
-            if not update_fields:
-                raise HTTPException(status_code=400, detail="No fields to update")
+                if not update_fields:
+                    raise HTTPException(status_code=400, detail="No fields to update")
 
-            values.append(item_id)
-            query = f"UPDATE data_sources SET {', '.join(update_fields)} WHERE item_id = %s RETURNING *"
+                values.append(item_id)
+                query = f"UPDATE data_sources SET {', '.join(update_fields)} WHERE item_id = %s RETURNING *"
 
-            cur.execute(query, values)
-            updated_source = cur.fetchone()
+                cur.execute(query, values)
+                updated_source = cur.fetchone()
 
-            if not updated_source:
-                raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found")
+                if not updated_source:
+                    raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found")
 
-            conn.commit()
-            return {
-                "message": f"Data source '{item_id}' updated successfully",
-                "data": updated_source
-            }
+                conn.commit()
+                return {
+                    "message": f"Data source '{item_id}' updated successfully",
+                    "data": updated_source
+                }
+            except psycopg2.errors.UndefinedTable:
+                conn.rollback()
+                raise HTTPException(status_code=404, detail=f"Data source '{item_id}' not found (data_sources table does not exist)")
     except HTTPException:
         conn.rollback()
         raise
@@ -1841,7 +1854,8 @@ async def submit_lore_story_endpoint(request: Request):
     {
       "title": "Story title",
       "story_text": "The story content...",
-      "location_description": "Optional location context",
+      "location": "User-provided location name (saved directly to place_name)",
+      "location_description": "Optional location context for AI extraction",
       "created_by": "username"
     }
     """
@@ -1855,6 +1869,7 @@ async def submit_lore_story_endpoint(request: Request):
         # Extract required fields
         title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
         story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
+        user_location = payload.get("location") or payload.get("place_name")  # User-provided location
         location_description = payload.get("location_description")
         created_by = payload.get("created_by", "anonymous")
 
@@ -1865,6 +1880,8 @@ async def submit_lore_story_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="Missing required field: story_text")
 
         logger.info(f"Received story submission: '{title}' from {created_by}")
+        if user_location:
+            logger.info(f"User-provided location: '{user_location}'")
 
         # Call AI extraction agent directly (async version)
         request = ExtractionRequest(
@@ -1888,6 +1905,13 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_extracted_locations": []
             }
         else:
+            # If user provided a location, override AI-extracted location for all lore entries
+            # This must happen BEFORE score calculation
+            if user_location:
+                for lore in lore_extractions:
+                    lore.place_name = user_location
+                logger.info(f"Overriding AI-extracted locations with user-provided: '{user_location}'")
+
             # Calculate scores for each extracted lore entry using LoreScoreCalculator
             for lore in lore_extractions:
                 lore_score_calculator.update_lore_with_scores(lore)
@@ -1897,9 +1921,13 @@ async def submit_lore_story_endpoint(request: Request):
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     for lore in lore_extractions:
+                        # lore.place_name already contains the correct location
+                        # (user-provided if given, otherwise AI-extracted)
+                        place_name = lore.place_name or "Unknown Location"
+
                         # Create or get location for this lore entry
-                        # Use placeholder coordinates (0, 0) when AI doesn't extract specific lat/lng
-                        # This allows saving extracted place names while respecting NOT NULL constraints
+                        # Use placeholder coordinates (0, 0) when we don't have specific lat/lng
+                        # This allows saving place names while respecting NOT NULL constraints
                         cur.execute("""
                             INSERT INTO location (name, latitude, longitude, description)
                             VALUES (%s, %s, %s, %s)
@@ -1907,10 +1935,10 @@ async def submit_lore_story_endpoint(request: Request):
                             DO UPDATE SET description = EXCLUDED.description
                             RETURNING location_id
                         """, (
-                            lore.place_name or "Unknown Location",
-                            0.0,  # Placeholder - AI extracted place name but no coordinates
+                            place_name,
                             0.0,  # Placeholder - can be updated later with geocoding
-                            f"Extracted from story: {title}"
+                            0.0,  # Placeholder - can be updated later with geocoding
+                            f"From story: {title}" + (" (user-provided)" if user_location else " (AI-extracted)")
                         ))
                         location_id = cur.fetchone()['location_id']
 
@@ -1939,7 +1967,7 @@ async def submit_lore_story_endpoint(request: Request):
                             location_id,
                             title,  # Story title goes to lore_title
                             lore.event_narrative,
-                            lore.place_name,
+                            place_name,  # Already contains user-provided or AI-extracted location
                             lore.years_ago,
                             source_type_str,
                             lore.event_date,  # AI extracted date
@@ -1955,6 +1983,7 @@ async def submit_lore_story_endpoint(request: Request):
 
             # Return summary of the first/primary extraction
             primary_lore = lore_extractions[0]
+
             ai_results = {
                 "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
                 "ai_event_type": "mass_movement",
@@ -1964,9 +1993,11 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_l_score": primary_lore.l_score or 0.0,  # Overall L score
                 "ai_confidence": primary_lore.confidence_band or 0.5,
                 "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
+                "saved_location": primary_lore.place_name,  # Location saved to database (already user-provided or AI-extracted)
+                "location_source": "user" if user_location else "ai",  # Indicates where location came from
                 "ai_extracted_locations": [
                     {
-                        "name": lore.place_name,
+                        "name": lore.place_name,  # Now contains user-provided location if given
                         "confidence": lore.confidence_band or 0.5,
                         "l_score": lore.l_score or 0.0
                     } for lore in lore_extractions
@@ -2254,6 +2285,51 @@ def get_lore_narrative(
                 FROM local_lore ll
                 LEFT JOIN location l ON ll.location_id = l.location_id
                 ORDER BY ll.created_at DESC
+            """
+            cur.execute(query)
+            stories = cur.fetchall()
+
+            return {
+                "count": len(stories),
+                "stories": stories
+            }
+    finally:
+        conn.close()
+
+@app.get("/api/lore/stories")
+def get_lore_stories(
+    area_id: Optional[int] = None,
+    scenario_type: Optional[str] = None,
+    ai_status: Optional[str] = None
+):
+    """Get all lore stories from local_lore table. Alias for /api/lore/narrative endpoint."""
+    conn = get_conn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            query = """
+                SELECT
+                    ll.lore_id as story_id,
+                    ll.location_id as area_id,
+                    ll.lore_title as title,
+                    ll.lore_narrative as story_text,
+                    'user_story' as scenario_type,
+                    l.latitude,
+                    l.longitude,
+                    l.description as location_description,
+                    'completed' as ai_status,
+                    ll.created_date as created_at,
+                    ll.source_type as ai_event_type,
+                    ll.years_ago,
+                    ll.l2_credibility_score as ai_credibility_score,
+                    ll.l1_recency_score as ai_recency_score,
+                    ll.l3_spatial_score as ai_spatial_relevance,
+                    ll.l_score as ai_l_score,
+                    ll.place_name,
+                    'user' as created_by,
+                    ll.event_date
+                FROM local_lore ll
+                LEFT JOIN location l ON ll.location_id = l.location_id
+                ORDER BY ll.created_date DESC
             """
             cur.execute(query)
             stories = cur.fetchall()
