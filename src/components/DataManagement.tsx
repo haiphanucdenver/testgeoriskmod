@@ -644,21 +644,22 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
     try {
       // Save to local_lore table with proper column mapping
-      const response = await lFactorAPI.submitStory({
-        location_name: locationName,
-        latitude: mapLocation.lat,
-        longitude: mapLocation.lng,
-        location_description: `L Factor story collected on ${new Date().toLocaleDateString()}`,
-        region: '',
-        title: newLoreEntry.eventType || 'Local Lore Entry',
-        story: newLoreEntry.description || '',
-        location_place: newLoreEntry.location || locationName,
-        years_ago: newLoreEntry.recency,
-        credibility: newLoreEntry.credibility || 'newspaper',
-        spatial_accuracy: newLoreEntry.spatialAccuracy || 'approximate',
-      });
-
-      const now = new Date();
+            const response = await lFactorAPI.submitStory({
+              location_name: locationName,
+              latitude: mapLocation.lat,
+              longitude: mapLocation.lng,
+              location_description: `L Factor story collected on ${new Date().toLocaleDateString()}`,
+              region: '',
+              source_type: newLoreEntry.credibility || 'newspaper',
+              title: newLoreEntry.eventType || 'Local Lore Entry',
+              story: newLoreEntry.description || '',
+              location_place: newLoreEntry.location || locationName,
+              years_ago: newLoreEntry.recency,
+              credibility: newLoreEntry.credibility || 'newspaper',
+              spatial_accuracy: newLoreEntry.spatialAccuracy || 'approximate',
+            });
+      
+            const now = new Date();
       const loreEntry: LocalLoreEntry = {
         id: response.lore_id.toString(),
         eventType: newLoreEntry.eventType || '',
@@ -770,7 +771,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       const originalLoreEntry = localLoreEntries.find(e => e.id === editingLoreEntryId);
 
       // Build changes description
-      const changes = [];
+      const changes: string[] = [];
       if (originalLoreEntry) {
         if (editingLoreEntry.eventType && editingLoreEntry.eventType !== originalLoreEntry.eventType) {
           changes.push(`type: ${originalLoreEntry.eventType} → ${editingLoreEntry.eventType}`);
@@ -782,37 +783,37 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
           changes.push(`credibility: ${originalLoreEntry.credibility} → ${editingLoreEntry.credibility}`);
         }
       }
-
       // Call backend API to update event in local_lore table
-      await lFactorAPI.update(editingLoreEntryId, {
-        location_name: locationName,
-        latitude: mapLocation.lat,
-        longitude: mapLocation.lng,
-        location_description: `L Factor story updated on ${new Date().toLocaleDateString()}`,
-        region: '',
-        title: editingLoreEntry.eventType || 'Local Lore Entry',
-        story: editingLoreEntry.description || '',
-        location_place: editingLoreEntry.location || locationName,
-        years_ago: editingLoreEntry.recency,
-        credibility: editingLoreEntry.credibility || 'newspaper',
-        spatial_accuracy: editingLoreEntry.spatialAccuracy || 'approximate',
-      });
-
-      setLocalLoreEntries(prev => prev.map(loreEntry =>
-        loreEntry.id === editingLoreEntryId
-          ? {
-              ...loreEntry,
-              eventType: editingLoreEntry.eventType || loreEntry.eventType,
-              recency: editingLoreEntry.recency !== undefined ? editingLoreEntry.recency : loreEntry.recency,
-              location: editingLoreEntry.location || loreEntry.location,
-              description: editingLoreEntry.description || loreEntry.description,
-              source: editingLoreEntry.source || loreEntry.source,
-              credibility: editingLoreEntry.credibility || loreEntry.credibility,
-              spatialAccuracy: editingLoreEntry.spatialAccuracy || loreEntry.spatialAccuracy,
-              lastModified: now
-            }
-          : loreEntry
-      ));
+            await lFactorAPI.update(editingLoreEntryId, {
+              location_name: locationName,
+              latitude: mapLocation.lat,
+              longitude: mapLocation.lng,
+              location_description: `L Factor story updated on ${new Date().toLocaleDateString()}`,
+              region: '',
+              source_type: editingLoreEntry.credibility || 'newspaper',
+              title: editingLoreEntry.eventType || 'Local Lore Entry',
+              story: editingLoreEntry.description || '',
+              location_place: editingLoreEntry.location || locationName,
+              years_ago: editingLoreEntry.recency,
+              credibility: editingLoreEntry.credibility || 'newspaper',
+              spatial_accuracy: editingLoreEntry.spatialAccuracy || 'approximate',
+            });
+      
+            setLocalLoreEntries(prev => prev.map(loreEntry =>
+              loreEntry.id === editingLoreEntryId
+                ? {
+                    ...loreEntry,
+                    eventType: editingLoreEntry.eventType || loreEntry.eventType,
+                    recency: editingLoreEntry.recency !== undefined ? editingLoreEntry.recency : loreEntry.recency,
+                    location: editingLoreEntry.location || loreEntry.location,
+                    description: editingLoreEntry.description || loreEntry.description,
+                    source: editingLoreEntry.source || loreEntry.source,
+                    credibility: editingLoreEntry.credibility || loreEntry.credibility,
+                    spatialAccuracy: editingLoreEntry.spatialAccuracy || loreEntry.spatialAccuracy,
+                    lastModified: now
+                  }
+                : loreEntry
+            ));
 
       // Add to change log
       if (originalLoreEntry && changes.length > 0) {
@@ -1082,11 +1083,18 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
       if (response.ai_status === 'completed') {
         toast.success(`Story analyzed successfully! AI extracted: ${response.ai_results?.ai_event_type || 'information'}`);
       } else {
-        toast.error(`Story submitted but AI analysis failed: ${response.error}`);
+        toast.error(`Story submitted but AI analysis failed: ${response.message || 'Unknown error'}`);
       }
 
       // Clear form and reload stories
-      setStoryForm({ title: '', story_text: '', location_description: '' });
+      setStoryForm({
+        title: '',
+        story_text: '',
+        location_description: '',
+        recency_years: '',
+        credibility: '',
+        spatial_relevance_m: ''
+      });
       await loadLoreStories();
     } catch (error) {
       toast.dismiss(loadingToast);
@@ -1159,7 +1167,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
           toast.success(`Observation analyzed: ${response.ai_results?.interpretation}`);
         }
       } else {
-        toast.error(`Observation submitted but AI analysis failed: ${response.error}`);
+        toast.error(`Observation submitted but AI analysis failed: ${response.message || 'Unknown error'}`);
       }
 
       // Clear form and reload stories
@@ -1168,7 +1176,10 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         latitude: mapLocation.lat,
         longitude: mapLocation.lng,
         observation_sight: '',
-        observation_sound: ''
+        observation_sound: '',
+        recency_years: '',
+        credibility: '',
+        spatial_relevance_m: ''
       });
       await loadLoreStories();
     } catch (error) {
@@ -1186,37 +1197,37 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   }, [isAPIConnected]);
 
   // Fetch location name using reverse geocoding
-  useEffect(() => {
-    const MAPBOX_API_KEY = import.meta.env.VITE_MAPBOX_API_KEY;
-    if (!MAPBOX_API_KEY || MAPBOX_API_KEY === 'YOUR_MAPBOX_API_KEY_HERE') {
-      setLocationName("Mount Hood Area, Oregon, USA");
-      return;
-    }
-
-    const timeoutId = setTimeout(() => {
-      setIsLoadingLocation(true);
-      const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${mapLocation.lng},${mapLocation.lat}.json?access_token=${MAPBOX_API_KEY}&types=place,locality,neighborhood,address`;
-
-      fetch(geocodeUrl)
-        .then(response => response.json())
-        .then(data => {
-          if (data.features && data.features.length > 0) {
-            const feature = data.features[0];
-            setLocationName(feature.place_name || "Unknown Location");
-          } else {
-            setLocationName("Unknown Location");
-          }
-          setIsLoadingLocation(false);
-        })
-        .catch(error => {
-          console.error('Reverse geocoding error:', error);
-          setLocationName("Location unavailable");
-          setIsLoadingLocation(false);
-        });
-    }, 1000);
-
-    return () => clearTimeout(timeoutId);
-  }, [mapLocation.lat, mapLocation.lng]);
+    useEffect(() => {
+      const MAPBOX_API_KEY = (import.meta as any).env?.VITE_MAPBOX_API_KEY;
+      if (!MAPBOX_API_KEY || MAPBOX_API_KEY === 'YOUR_MAPBOX_API_KEY_HERE') {
+        setLocationName("Mount Hood Area, Oregon, USA");
+        return;
+      }
+  
+      const timeoutId = setTimeout(() => {
+        setIsLoadingLocation(true);
+        const geocodeUrl = `https://api.mapbox.com/geocoding/v5/mapbox.places/${mapLocation.lng},${mapLocation.lat}.json?access_token=${MAPBOX_API_KEY}&types=place,locality,neighborhood,address`;
+  
+        fetch(geocodeUrl)
+          .then(response => response.json())
+          .then(data => {
+            if (data.features && data.features.length > 0) {
+              const feature = data.features[0];
+              setLocationName(feature.place_name || "Unknown Location");
+            } else {
+              setLocationName("Unknown Location");
+            }
+            setIsLoadingLocation(false);
+          })
+          .catch(error => {
+            console.error('Reverse geocoding error:', error);
+            setLocationName("Location unavailable");
+            setIsLoadingLocation(false);
+          });
+      }, 1000);
+  
+      return () => clearTimeout(timeoutId);
+    }, [mapLocation.lat, mapLocation.lng]);
 
   // Fetch elevation data
   useEffect(() => {
