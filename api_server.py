@@ -1841,7 +1841,8 @@ async def submit_lore_story_endpoint(request: Request):
     {
       "title": "Story title",
       "story_text": "The story content...",
-      "location_description": "Optional location context",
+      "location": "User-provided location name (saved directly to place_name)",
+      "location_description": "Optional location context for AI extraction",
       "created_by": "username"
     }
     """
@@ -1855,6 +1856,7 @@ async def submit_lore_story_endpoint(request: Request):
         # Extract required fields
         title = payload.get("title") or payload.get("story_title") or payload.get("title_text")
         story_text = payload.get("story_text") or payload.get("story") or payload.get("text")
+        user_location = payload.get("location") or payload.get("place_name")  # User-provided location
         location_description = payload.get("location_description")
         created_by = payload.get("created_by", "anonymous")
 
@@ -1865,6 +1867,8 @@ async def submit_lore_story_endpoint(request: Request):
             raise HTTPException(status_code=400, detail="Missing required field: story_text")
 
         logger.info(f"Received story submission: '{title}' from {created_by}")
+        if user_location:
+            logger.info(f"User-provided location: '{user_location}'")
 
         # Call AI extraction agent directly (async version)
         request = ExtractionRequest(
@@ -1897,9 +1901,12 @@ async def submit_lore_story_endpoint(request: Request):
             try:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     for lore in lore_extractions:
+                        # Use user-provided location if available, otherwise use AI-extracted place_name
+                        final_place_name = user_location or lore.place_name or "Unknown Location"
+
                         # Create or get location for this lore entry
                         # Use placeholder coordinates (0, 0) when AI doesn't extract specific lat/lng
-                        # This allows saving extracted place names while respecting NOT NULL constraints
+                        # This allows saving place names while respecting NOT NULL constraints
                         cur.execute("""
                             INSERT INTO location (name, latitude, longitude, description)
                             VALUES (%s, %s, %s, %s)
@@ -1907,10 +1914,10 @@ async def submit_lore_story_endpoint(request: Request):
                             DO UPDATE SET description = EXCLUDED.description
                             RETURNING location_id
                         """, (
-                            lore.place_name or "Unknown Location",
-                            0.0,  # Placeholder - AI extracted place name but no coordinates
+                            final_place_name,
                             0.0,  # Placeholder - can be updated later with geocoding
-                            f"Extracted from story: {title}"
+                            0.0,  # Placeholder - can be updated later with geocoding
+                            f"From story: {title}" + (" (user-provided)" if user_location else " (AI-extracted)")
                         ))
                         location_id = cur.fetchone()['location_id']
 
@@ -1939,7 +1946,7 @@ async def submit_lore_story_endpoint(request: Request):
                             location_id,
                             title,  # Story title goes to lore_title
                             lore.event_narrative,
-                            lore.place_name,
+                            final_place_name,  # Use user-provided location or AI-extracted
                             lore.years_ago,
                             source_type_str,
                             lore.event_date,  # AI extracted date
@@ -1955,6 +1962,8 @@ async def submit_lore_story_endpoint(request: Request):
 
             # Return summary of the first/primary extraction
             primary_lore = lore_extractions[0]
+            final_place_name = user_location or primary_lore.place_name or "Unknown Location"
+
             ai_results = {
                 "ai_event_date": primary_lore.event_date.isoformat() if primary_lore.event_date else None,
                 "ai_event_type": "mass_movement",
@@ -1964,6 +1973,8 @@ async def submit_lore_story_endpoint(request: Request):
                 "ai_l_score": primary_lore.l_score or 0.0,  # Overall L score
                 "ai_confidence": primary_lore.confidence_band or 0.5,
                 "ai_summary": f"Extracted {len(lore_extractions)} event(s). Primary: {primary_lore.event_narrative[:200]}..." if primary_lore.event_narrative else "Event extracted",
+                "saved_location": final_place_name,  # Location saved to database (user-provided or AI-extracted)
+                "location_source": "user" if user_location else "ai",  # Indicates where location came from
                 "ai_extracted_locations": [
                     {
                         "name": lore.place_name,
