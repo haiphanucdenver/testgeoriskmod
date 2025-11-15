@@ -158,8 +158,9 @@ class LoreScoreCalculator:
         """
         # Calculate component scores
         recent_score = self.calculate_recent_score(
-            lore.years_ago or 0, 
-            lore.event_date_uncertainty_years or 0
+            lore.years_ago or 0,
+            lore.event_date_uncertainty_years or 0,
+            source_type=lore.source_type
         )
         
         credibility_score = self.calculate_credibility_score(
