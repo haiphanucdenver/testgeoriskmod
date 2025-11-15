@@ -2209,28 +2209,35 @@ def get_lore_stories(
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
-    """Get all lore stories with optional filters"""
+    """
+    Get all lore stories from local_lore table.
+    Maps local_lore data to frontend-expected format for AI agent stories.
+    """
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM lore_stories WHERE 1=1"
-            params = {}
-
-            if area_id is not None:
-                query += " AND area_id = %(area_id)s"
-                params['area_id'] = area_id
-
-            if scenario_type:
-                query += " AND scenario_type = %(scenario_type)s"
-                params['scenario_type'] = scenario_type
-
-            if ai_status:
-                query += " AND ai_status = %(ai_status)s"
-                params['ai_status'] = ai_status
-
-            query += " ORDER BY created_at DESC"
-
-            cur.execute(query, params)
+            # Query local_lore table instead of non-existent lore_stories table
+            cur.execute("""
+                SELECT
+                    ll.lore_id as story_id,
+                    ll.location_id as area_id,
+                    ll.source_title as title,
+                    ll.lore_narrative as story_text,
+                    'user_story' as scenario_type,
+                    l.latitude,
+                    l.longitude,
+                    l.description as location_description,
+                    'completed' as ai_status,
+                    ll.created_at,
+                    ll.source_type as ai_event_type,
+                    ll.years_ago,
+                    ll.credibility_confidence as ai_credibility_score,
+                    ll.place_name,
+                    'user' as created_by
+                FROM local_lore ll
+                LEFT JOIN location l ON ll.location_id = l.location_id
+                ORDER BY ll.created_at DESC
+            """)
             stories = cur.fetchall()
 
             return {
