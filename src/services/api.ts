@@ -3,8 +3,8 @@
  * Handles all communication with the backend REST API
  */
 
-// Hardcoded API URL for LightSail deployment
-const API_BASE_URL = 'http://100.26.170.156:8001';
+// Get API URL from environment variable, fallback to localhost for development
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
 
 /**
  * Generic fetch wrapper with error handling
