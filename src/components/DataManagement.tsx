@@ -672,7 +672,8 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
         lastModified: now
       };
 
-      setLocalLoreEntries(prev => [...prev, event]);
+      // Append the constructed loreEntry (was incorrectly using `event`)
+      setLocalLoreEntries(prev => [...prev, loreEntry]);
 
       // Add to change log
       setLoreChangeLog(prev => [...prev, {
@@ -846,23 +847,67 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const handleToggleSelectEvent = (loreEntryId: string) => {
     setSelectedLoreEntryIds(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(eventId)) {
-        newSet.delete(eventId);
+      if (newSet.has(loreEntryId)) {
+        newSet.delete(loreEntryId);
       } else {
-        newSet.add(eventId);
+        newSet.add(loreEntryId);
       }
       return newSet;
     });
   };
 
+  // Helper: compute filtered & sorted lore entries (used by UI and selection helpers)
+  const getFilteredAndSortedLoreEntries = (): LocalLoreEntry[] => {
+    const filtered = localLoreEntries
+      .filter(loreEntry => {
+        // Search filter (searches across multiple fields)
+        const searchLower = searchQuery.toLowerCase();
+        const matchesSearch = searchQuery === '' ||
+          loreEntry.eventType.toLowerCase().includes(searchLower) ||
+          loreEntry.recency.toString().includes(searchLower) ||
+          loreEntry.location.toLowerCase().includes(searchLower) ||
+          loreEntry.description.toLowerCase().includes(searchLower) ||
+          loreEntry.source.toLowerCase().includes(searchLower);
+
+        // Credibility filter
+        const matchesCredibility = filterCredibility === 'all' || loreEntry.credibility === filterCredibility;
+
+        // Event type filter
+        const matchesEventType = filterLoreType === 'all' || loreEntry.eventType.toLowerCase().includes(filterLoreType.toLowerCase());
+
+        return matchesSearch && matchesCredibility && matchesEventType;
+      });
+
+    const sorted = filtered.sort((a, b) => {
+      let comparison = 0;
+
+      if (sortField === 'date') {
+        // Prefer createdAt or lastModified for date sorting
+        const aDate = a.createdAt ? a.createdAt.toISOString() : (a.lastModified ? a.lastModified.toISOString() : '');
+        const bDate = b.createdAt ? b.createdAt.toISOString() : (b.lastModified ? b.lastModified.toISOString() : '');
+        comparison = aDate.localeCompare(bDate);
+      } else if (sortField === 'eventType') {
+        comparison = a.eventType.localeCompare(b.eventType);
+      } else if (sortField === 'credibility') {
+        const credibilityOrder: Record<string, number> = { 'instrumented': 1, 'eyewitness': 2, 'expert': 3, 'newspaper': 4, 'oral-tradition': 5 };
+        comparison = (credibilityOrder[a.credibility] || 99) - (credibilityOrder[b.credibility] || 99);
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return sorted;
+  };
+
   // Handle select all visible events
   const handleSelectAllVisible = () => {
-    if (selectedLoreEntryIds.size === filteredAndSortedLoreEntries.length) {
+    const visible = getFilteredAndSortedLoreEntries();
+    if (selectedLoreEntryIds.size === visible.length && visible.length > 0) {
       // If all visible are selected, deselect all
       setSelectedLoreEntryIds(new Set());
     } else {
       // Select all visible events
-      setSelectedLoreEntryIds(new Set(filteredAndSortedLoreEntries.map(e => e.id)));
+      setSelectedLoreEntryIds(new Set(visible.map(e => e.id)));
     }
   };
 
@@ -870,15 +915,17 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   const handleBulkDelete = () => {
     if (selectedLoreEntryIds.size === 0) return;
 
-    setLocalLoreEntries(prev => prev.filter(e => !selectedLoreEntryIds.has(e.id)));
+    setLocalLoreEntries(prev => {
+      const remaining = prev.filter(e => !selectedLoreEntryIds.has(e.id));
+      // Update Local Lore status back to missing if no events left
+      if (remaining.length === 0) {
+        setLocalLoreData(p => p.map(item =>
+          item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
+        ));
+      }
+      return remaining;
+    });
     setSelectedLoreEntryIds(new Set());
-
-    // Update Local Lore status back to missing if no events left
-    if (localLoreEntries.length === selectedLoreEntryIds.size) {
-      setLocalLoreData(prev => prev.map(item =>
-        item.id === 'local-lore-entries' ? { ...item, status: 'missing' as const } : item
-      ));
-    }
   };
 
   // Handle bulk export
@@ -972,60 +1019,22 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
     document.body.removeChild(link);
   };
 
-  // Filter and sort local lore entries
-  const filteredAndSortedLoreEntries = localLoreEntries
-    .filter(loreEntry => {
-      // Search filter (searches across multiple fields)
-      const searchLower = searchQuery.toLowerCase();
-      const matchesSearch = searchQuery === '' ||
-        loreEntry.eventType.toLowerCase().includes(searchLower) ||
-        loreEntry.recency.toString().includes(searchLower) ||
-        loreEntry.location.toLowerCase().includes(searchLower) ||
-        loreEntry.description.toLowerCase().includes(searchLower) ||
-        loreEntry.source.toLowerCase().includes(searchLower);
-
-      // Credibility filter
-      const matchesCredibility = filterCredibility === 'all' || loreEntry.credibility === filterCredibility;
-
-      // Event type filter
-      const matchesEventType = filterLoreType === 'all' || loreEntry.eventType.toLowerCase().includes(filterLoreType.toLowerCase());
-
-      return matchesSearch && matchesCredibility && matchesEventType;
-    })
-    .sort((a, b) => {
-      let comparison = 0;
-
-      if (sortField === 'date') {
-        // Simple string comparison for dates (works for many formats like "1996", "March 2020", "2020-03-15")
-        comparison = a.date.localeCompare(b.date);
-      } else if (sortField === 'eventType') {
-        comparison = a.eventType.localeCompare(b.eventType);
-      } else if (sortField === 'credibility') {
-        const credibilityOrder = { 'instrumented': 1, 'eyewitness': 2, 'expert': 3, 'newspaper': 4, 'oral-tradition': 5 };
-        comparison = (credibilityOrder[a.credibility] || 99) - (credibilityOrder[b.credibility] || 99);
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-  // Get unique event types for filter dropdown
-  const uniqueEventTypes = Array.from(new Set(localLoreEntries.map(e => e.eventType).filter(t => t)));
-
   // Calculate statistics
   const statistics = {
     total: localLoreEntries.length,
-    byType: localLoreEntries.reduce((acc, event) => {
-      acc[loreEntry.eventType] = (acc[loreEntry.eventType] || 0) + 1;
+    byType: localLoreEntries.reduce((acc, e) => {
+      acc[e.eventType] = (acc[e.eventType] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
-    byCredibility: localLoreEntries.reduce((acc, event) => {
-      acc[loreEntry.credibility] = (acc[loreEntry.credibility] || 0) + 1;
+    byCredibility: localLoreEntries.reduce((acc, e) => {
+      acc[e.credibility] = (acc[e.credibility] || 0) + 1;
       return acc;
     }, {} as Record<string, number>),
-    dateRange: localLoreEntries.length > 0 ? {
-      earliest: localLoreEntries.map(e => e.date).sort()[0],
-      latest: localLoreEntries.map(e => e.date).sort()[localLoreEntries.length - 1]
-    } : null
+    dateRange: localLoreEntries.length > 0 ? (() => {
+      const dates = localLoreEntries.map(e => e.createdAt ? e.createdAt.toISOString() : '').filter(d => d);
+      dates.sort();
+      return { earliest: dates[0], latest: dates[dates.length - 1] };
+    })() : null
   };
 
   // Clear all filters
@@ -1838,17 +1847,23 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
   };
 
   // Render completeness indicator
-  const renderCompleteness = (completed: number, total: number) => {
-    const circles = [];
-    for (let i = 0; i < total; i++) {
-      circles.push(
-        <div
-          key={i}
-          className={`w-4 h-4 rounded-full ${i < completed ? 'bg-green-500' : 'bg-gray-600'}`}
-        />
-      );
-    }
-    return <div className="flex gap-1">{circles}</div>;
+  const renderCompleteness = (completed: number = 0, total: number = 0) => {
+    const safeTotal = Math.max(0, Math.floor(Number(total) || 0));
+    const safeCompleted = Math.max(0, Math.min(Math.floor(Number(completed) || 0), safeTotal));
+
+    const circles = Array.from({ length: safeTotal }, (_, i) => (
+      <div
+        key={i}
+        aria-hidden
+        className={`w-4 h-4 rounded-full ${i < safeCompleted ? 'bg-green-500' : 'bg-gray-600'}`}
+      />
+    ));
+
+    return (
+      <div className="flex gap-1" aria-label={`Completeness: ${safeCompleted} of ${safeTotal}`}>
+        {circles}
+      </div>
+    );
   };
 
   // Render quality indicator
