@@ -2209,39 +2209,11 @@ def get_lore_narrative(
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
-<<<<<<< HEAD
-    """Get all lore narratives with optional filters"""
+    """Get all lore stories from local_lore table with optional area filter and map to frontend format."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            query = "SELECT * FROM lore_narrative WHERE 1=1"
-            params = {}
-
-            if area_id is not None:
-                query += " AND area_id = %(area_id)s"
-                params['area_id'] = area_id
-
-            if scenario_type:
-                query += " AND scenario_type = %(scenario_type)s"
-                params['scenario_type'] = scenario_type
-
-            if ai_status:
-                query += " AND ai_status = %(ai_status)s"
-                params['ai_status'] = ai_status
-
-            query += " ORDER BY created_at DESC"
-
-            cur.execute(query, params)
-=======
-    """
-    Get all lore stories from local_lore table.
-    Maps local_lore data to frontend-expected format for AI agent stories.
-    """
-    conn = get_conn()
-    try:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            # Query local_lore table instead of non-existent lore_stories table
-            cur.execute("""
+            query = """
                 SELECT
                     ll.lore_id as story_id,
                     ll.location_id as area_id,
@@ -2260,9 +2232,19 @@ def get_lore_narrative(
                     'user' as created_by
                 FROM local_lore ll
                 LEFT JOIN location l ON ll.location_id = l.location_id
-                ORDER BY ll.created_at DESC
-            """)
->>>>>>> c12dc4dda28e0c2e797a383bd6df660fec209609
+                WHERE 1=1
+            """
+            params = {}
+
+            # Apply optional filters where applicable
+            if area_id is not None:
+                query += " AND ll.location_id = %(area_id)s"
+                params['area_id'] = area_id
+
+            # scenario_type and ai_status are not stored on local_lore; ignore if provided
+            query += " ORDER BY ll.created_at DESC"
+
+            cur.execute(query, params)
             stories = cur.fetchall()
 
             return {
