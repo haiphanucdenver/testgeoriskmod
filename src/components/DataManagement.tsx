@@ -2603,7 +2603,7 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                         <div className="mb-4">
                           <h4 className="text-md font-semibold text-gray-900 mb-2">Submit Story/Lore</h4>
                           <p className="text-sm text-gray-700">
-                            Provide a story or lore (text or file). Our AI agent will analyze it to extract recency, spatial information, and credibility.
+                            Provide a story or lore. Our AI agent will analyze it to extract recency, spatial information, and credibility.
                           </p>
                         </div>
 
@@ -2643,20 +2643,20 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
                           <div>
                             <Label htmlFor="story-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
-                            <Input
+                            {/* <Input
                               id="story-recency"
                               type="number"
                               placeholder="e.g., 50"
                               value={storyForm.recency_years}
                               onChange={(e) => setStoryForm({...storyForm, recency_years: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
+                            /> */}
                             <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
                           </div>
 
                           <div>
                             <Label htmlFor="story-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
-                            <Select
+                            {/* <Select
                               value={storyForm.credibility}
                               onValueChange={(value) => setStoryForm({...storyForm, credibility: value})}
                             >
@@ -2670,20 +2670,20 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                                 <SelectItem value="newspaper">Newspaper = 0.60</SelectItem>
                                 <SelectItem value="oral-tradition">Oral-Tradition = 0.45</SelectItem>
                               </SelectContent>
-                            </Select>
+                            </Select> */}
                             <p className="text-xs text-gray-700 mt-1">Source type and reliability. Higher values indicate more reliable sources.</p>
                           </div>
 
                           <div>
                             <Label htmlFor="story-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
-                            <Input
+                            {/* <Input
                               id="story-spatial"
                               type="number"
                               placeholder="e.g., 100"
                               value={storyForm.spatial_relevance_m}
                               onChange={(e) => setStoryForm({...storyForm, spatial_relevance_m: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
+                            /> */}
                             <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
@@ -2753,20 +2753,20 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
 
                           <div>
                             <Label htmlFor="discover-recency" className="text-gray-900 mb-2 block">Recency (years)</Label>
-                            <Input
+                            {/* <Input
                               id="discover-recency"
                               type="number"
                               placeholder="e.g., 50"
                               value={discoverForm.recency_years}
                               onChange={(e) => setDiscoverForm({...discoverForm, recency_years: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
+                            /> */}
                             <p className="text-xs text-gray-700 mt-1">How many years ago the event occurred</p>
                           </div>
 
                           <div>
                             <Label htmlFor="discover-credibility" className="text-gray-900 mb-2 block">Credibility</Label>
-                            <Select
+                            {/* <Select
                               value={discoverForm.credibility}
                               onValueChange={(value) => setDiscoverForm({...discoverForm, credibility: value})}
                             >
@@ -2778,20 +2778,20 @@ export function DataManagement({ mapLocation, onRiskCalculated }: DataManagement
                                 <SelectItem value="0.6">Historical = 0.6</SelectItem>
                                 <SelectItem value="0.9">Scientific = 0.9</SelectItem>
                               </SelectContent>
-                            </Select>
+                            </Select> */}
                             <p className="text-xs text-gray-700 mt-1">How reliable the information source is. Scientific or official sources have higher value</p>
                           </div>
 
                           <div>
                             <Label htmlFor="discover-spatial" className="text-gray-900 mb-2 block">Spatial Relevance (m)</Label>
-                            <Input
+                            {/* <Input
                               id="discover-spatial"
                               type="number"
                               placeholder="e.g., 100"
                               value={discoverForm.spatial_relevance_m}
                               onChange={(e) => setDiscoverForm({...discoverForm, spatial_relevance_m: e.target.value})}
                               className="bg-gray-100 border-gray-300 text-gray-900"
-                            />
+                            /> */}
                             <p className="text-xs text-gray-700 mt-1">Distance from reported Lore to the event</p>
                           </div>
 
