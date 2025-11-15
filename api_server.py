@@ -696,14 +696,12 @@ def submit_l_factor_story(data: LFactorStorySubmit):
     finally:
         conn.close()
 
-@app.get("/api/lore/stories")
 @app.get("/api/l-factor-stories")
 def get_all_l_factor_stories():
     """
     Get all L Factor stories from local_lore table
 
     Returns stories with proper column mapping for frontend display
-    Available at both /api/lore/stories and /api/l-factor-stories for compatibility
     """
     conn = get_conn()
     try:
@@ -2222,13 +2220,15 @@ def submit_observation(request: SubmitObservationRequest):
     finally:
         conn.close()
 
+@app.get("/api/lore/stories")
 @app.get("/api/lore/narrative")
 def get_lore_narrative(
     area_id: Optional[int] = None,
     scenario_type: Optional[str] = None,
     ai_status: Optional[str] = None
 ):
-    """Get all lore stories from local_lore table with optional area filter and map to frontend format."""
+    """Get all lore stories from local_lore table with optional area filter and map to frontend format.
+    Available at both /api/lore/stories and /api/lore/narrative for compatibility."""
     conn = get_conn()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
