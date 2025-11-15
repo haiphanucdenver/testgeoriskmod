@@ -708,19 +708,19 @@ def get_all_l_factor_stories():
                 SELECT
                     ll.lore_id,
                     ll.location_id,
-                    ll.source_title as title,
+                    ll.lore_title as title,
                     ll.lore_narrative as story,
                     ll.place_name as location_place,
                     ll.years_ago,
-                    ll.credibility_confidence,
+                    ll.l2_credibility_score as credibility_confidence,
                     ll.distance_to_report_location,
-                    ll.created_at,
+                    ll.created_date as created_at,
                     l.name as location_name,
                     l.latitude,
                     l.longitude
                 FROM local_lore ll
                 JOIN location l ON ll.location_id = l.location_id
-                ORDER BY ll.created_at DESC
+                ORDER BY ll.created_date DESC
             """)
             stories = cur.fetchall()
 
@@ -1912,28 +1912,28 @@ async def submit_lore_story_endpoint(request: Request):
                         source_type_str = lore.source_type.value if lore.source_type else 'unknown'
 
                         # Insert into local_lore table
+                        # Note: Scores (l1_recency_score, l2_credibility_score, l3_spatial_score, l_score)
+                        # are calculated by lore_calculator.py, not inserted here
                         cur.execute("""
                             INSERT INTO local_lore (
                                 location_id,
-                                source_title,
+                                lore_title,
                                 lore_narrative,
                                 place_name,
                                 years_ago,
                                 source_type,
-                                credibility_confidence,
-                                distance_to_report_location
+                                event_date
                             )
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)
                             RETURNING lore_id
                         """, (
                             location_id,
-                            lore.source_title or title,
+                            title,  # Story title goes to lore_title
                             lore.event_narrative,
                             lore.place_name,
                             lore.years_ago,
                             source_type_str,
-                            lore.confidence_band or lore.credibility_score,
-                            lore.distance_to_report or 0.0
+                            lore.event_date  # AI extracted date
                         ))
 
                     conn.commit()
@@ -2223,22 +2223,26 @@ def get_lore_stories(
                 SELECT
                     ll.lore_id as story_id,
                     ll.location_id as area_id,
-                    ll.source_title as title,
+                    ll.lore_title as title,
                     ll.lore_narrative as story_text,
                     'user_story' as scenario_type,
                     l.latitude,
                     l.longitude,
                     l.description as location_description,
                     'completed' as ai_status,
-                    ll.created_at,
+                    ll.created_date as created_at,
                     ll.source_type as ai_event_type,
                     ll.years_ago,
-                    ll.credibility_confidence as ai_credibility_score,
+                    ll.l2_credibility_score as ai_credibility_score,
                     ll.place_name,
-                    'user' as created_by
+                    'user' as created_by,
+                    ll.event_date,
+                    ll.l1_recency_score,
+                    ll.l3_spatial_score,
+                    ll.l_score
                 FROM local_lore ll
                 LEFT JOIN location l ON ll.location_id = l.location_id
-                ORDER BY ll.created_at DESC
+                ORDER BY ll.created_date DESC
             """)
             stories = cur.fetchall()
 
